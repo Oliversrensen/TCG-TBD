@@ -1,4 +1,4 @@
-import { createServer } from "http";
+import { createServer, type IncomingMessage, type ServerResponse } from "http";
 import { WebSocketServer } from "ws";
 import type { WebSocket } from "ws";
 import { createInitialState, applyAction } from "./game/state.js";
@@ -8,6 +8,9 @@ import type {
   ServerToClientMessage,
   MsgGameState,
 } from "./game/matchmaking-types.js";
+import { getOrCreateUserFromNeon } from "./auth/user-repository.js";
+import { verifyNeonToken } from "./auth/neon-auth.js";
+import { prisma } from "./prisma/client.js";
 
 const PORT = Number(process.env.PORT) || 8765;
 
@@ -35,6 +38,9 @@ interface Session {
   playerIndex?: 0 | 1;
   matchId?: string;
   lobbyCode?: string;
+   /** Optional authenticated user identity (from JWT). */
+  userId?: string;
+  username?: string;
 }
 
 interface Match {
@@ -123,12 +129,39 @@ function tryMatchFromQueue(): void {
   broadcastToMatch(match, gameState);
 }
 
+async function handleAuthenticate(session: Session, token: string): Promise<void> {
+  const payload = await verifyNeonToken(token);
+  if (!payload) {
+    send(session, { type: "auth_error", error: "Invalid or expired token" });
+    return;
+  }
+  const username = payload.name ?? payload.email ?? payload.sub;
+  try {
+    const user = await getOrCreateUserFromNeon(payload.sub, username);
+    session.userId = user.id;
+    session.username = user.username;
+    send(session, { type: "authenticated", userId: user.id, username: user.username });
+  } catch (err) {
+    console.error("auth getOrCreateUser error", err);
+    send(session, { type: "auth_error", error: "Authentication failed" });
+  }
+}
+
 function handleMatchmaking(session: Session, raw: string): void {
   let intent: MatchmakingIntent;
   try {
     intent = JSON.parse(raw) as MatchmakingIntent;
   } catch {
     send(session, { type: "matchmaking_error", error: "Invalid JSON" });
+    return;
+  }
+
+  if (intent.type === "authenticate") {
+    if (!intent.token) {
+      send(session, { type: "auth_error", error: "Missing token" });
+      return;
+    }
+    void handleAuthenticate(session, intent.token);
     return;
   }
 
@@ -270,9 +303,249 @@ function handleDisconnect(session: Session): void {
   }
 }
 
-const httpServer = createServer((_req, res) => {
-  res.writeHead(200, { "Content-Type": "text/plain" });
-  res.end("TCG server");
+function sendJson(res: ServerResponse, statusCode: number, body: unknown): void {
+  const json = JSON.stringify(body);
+  res.writeHead(statusCode, {
+    "Content-Type": "application/json",
+    "Content-Length": Buffer.byteLength(json),
+  });
+  res.end(json);
+}
+
+function readRequestBody(req: IncomingMessage): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let data = "";
+    req.on("data", (chunk) => {
+      data += chunk.toString();
+      if (data.length > 1_000_000) {
+        // 1MB safety limit
+        reject(new Error("Request body too large"));
+        req.destroy();
+      }
+    });
+    req.on("end", () => resolve(data));
+    req.on("error", (err) => reject(err));
+  });
+}
+
+async function parseJsonBody<T>(req: IncomingMessage, res: ServerResponse): Promise<T | null> {
+  try {
+    const text = await readRequestBody(req);
+    if (!text) {
+      sendJson(res, 400, { error: "Empty body" });
+      return null;
+    }
+    return JSON.parse(text) as T;
+  } catch {
+    sendJson(res, 400, { error: "Invalid JSON" });
+    return null;
+  }
+}
+
+async function getAuthFromRequest(
+  req: IncomingMessage,
+  res: ServerResponse
+): Promise<{ userId: string; username: string } | null> {
+  const authHeader = req.headers["authorization"];
+  if (!authHeader || Array.isArray(authHeader)) {
+    sendJson(res, 401, { error: "Missing Authorization header" });
+    return null;
+  }
+  const [scheme, token] = authHeader.split(" ");
+  if (scheme !== "Bearer" || !token) {
+    sendJson(res, 401, { error: "Invalid Authorization header" });
+    return null;
+  }
+  const payload = await verifyNeonToken(token);
+  if (!payload) {
+    sendJson(res, 401, { error: "Invalid or expired token" });
+    return null;
+  }
+  const username = payload.name ?? payload.email ?? payload.sub;
+  try {
+    const user = await getOrCreateUserFromNeon(payload.sub, username);
+    return { userId: user.id, username: user.username };
+  } catch (err) {
+    console.error("getAuthFromRequest getOrCreateUser error", err);
+    sendJson(res, 500, { error: "Authentication failed" });
+    return null;
+  }
+}
+
+async function handleListDecks(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const auth = await getAuthFromRequest(req, res);
+  if (!auth) return;
+  const decks = await prisma.deck.findMany({
+    where: { userId: auth.userId },
+    include: { cards: true },
+    orderBy: { createdAt: "asc" },
+  });
+  const payload = decks.map((deck) => ({
+    id: deck.id,
+    name: deck.name,
+    cards: deck.cards.map((c) => ({ cardId: c.cardId, count: c.count })),
+  }));
+  sendJson(res, 200, { decks: payload });
+}
+
+async function handleCreateDeck(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const auth = await getAuthFromRequest(req, res);
+  if (!auth) return;
+  type Body = { name?: string; cards?: { cardId?: string; count?: number }[] };
+  const body = await parseJsonBody<Body>(req, res);
+  if (!body) return;
+  const name = (body.name || "").trim();
+  const cards = body.cards ?? [];
+  if (!name) {
+    sendJson(res, 400, { error: "Deck name is required" });
+    return;
+  }
+  if (cards.length === 0) {
+    sendJson(res, 400, { error: "Deck must contain at least one card" });
+    return;
+  }
+  const normalized = cards
+    .map((c) => ({
+      cardId: (c.cardId || "").trim(),
+      count: typeof c.count === "number" ? c.count : 0,
+    }))
+    .filter((c) => c.cardId && c.count > 0);
+  if (normalized.length === 0) {
+    sendJson(res, 400, { error: "Deck must contain at least one valid card entry" });
+    return;
+  }
+  const created = await prisma.deck.create({
+    data: {
+      userId: auth.userId,
+      name,
+      cards: {
+        create: normalized.map((c) => ({
+          cardId: c.cardId,
+          count: c.count,
+        })),
+      },
+    },
+    include: { cards: true },
+  });
+  sendJson(res, 201, {
+    id: created.id,
+    name: created.name,
+    cards: created.cards.map((c) => ({ cardId: c.cardId, count: c.count })),
+  });
+}
+
+async function handleUpdateDeck(req: IncomingMessage, res: ServerResponse, deckId: string): Promise<void> {
+  const auth = await getAuthFromRequest(req, res);
+  if (!auth) return;
+  type Body = { name?: string; cards?: { cardId?: string; count?: number }[] };
+  const body = await parseJsonBody<Body>(req, res);
+  if (!body) return;
+  const existing = await prisma.deck.findFirst({
+    where: { id: deckId, userId: auth.userId },
+  });
+  if (!existing) {
+    sendJson(res, 404, { error: "Deck not found" });
+    return;
+  }
+  const name = typeof body.name === "string" ? body.name.trim() : existing.name;
+  const cards = body.cards;
+
+  await prisma.$transaction(async (tx) => {
+    await tx.deck.update({
+      where: { id: deckId },
+      data: { name },
+    });
+    if (cards) {
+      await tx.deckCard.deleteMany({ where: { deckId } });
+      const normalized = cards
+        .map((c) => ({
+          cardId: (c.cardId || "").trim(),
+          count: typeof c.count === "number" ? c.count : 0,
+        }))
+        .filter((c) => c.cardId && c.count > 0);
+      if (normalized.length > 0) {
+        await tx.deckCard.createMany({
+          data: normalized.map((c) => ({
+            deckId,
+            cardId: c.cardId,
+            count: c.count,
+          })),
+        });
+      }
+    }
+  });
+
+  const updated = await prisma.deck.findFirst({
+    where: { id: deckId, userId: auth.userId },
+    include: { cards: true },
+  });
+  if (!updated) {
+    sendJson(res, 404, { error: "Deck not found after update" });
+    return;
+  }
+  sendJson(res, 200, {
+    id: updated.id,
+    name: updated.name,
+    cards: updated.cards.map((c) => ({ cardId: c.cardId, count: c.count })),
+  });
+}
+
+async function handleDeleteDeck(req: IncomingMessage, res: ServerResponse, deckId: string): Promise<void> {
+  const auth = await getAuthFromRequest(req, res);
+  if (!auth) return;
+  const existing = await prisma.deck.findFirst({
+    where: { id: deckId, userId: auth.userId },
+  });
+  if (!existing) {
+    sendJson(res, 404, { error: "Deck not found" });
+    return;
+  }
+  await prisma.deck.delete({ where: { id: deckId } });
+  sendJson(res, 204, {});
+}
+
+const httpServer = createServer((req, res) => {
+  if (!req.url) {
+    res.writeHead(400, { "Content-Type": "text/plain" });
+    res.end("Bad request");
+    return;
+  }
+
+  const { method, url } = req;
+
+  const [path] = url.split("?", 1);
+
+  if (method === "GET" && path === "/") {
+    res.writeHead(200, { "Content-Type": "text/plain" });
+    res.end("TCG server");
+    return;
+  }
+
+  if (path === "/decks") {
+    if (method === "GET") {
+      void handleListDecks(req, res);
+      return;
+    }
+    if (method === "POST") {
+      void handleCreateDeck(req, res);
+      return;
+    }
+  }
+
+  if (path.startsWith("/decks/")) {
+    const deckId = decodeURIComponent(path.slice("/decks/".length));
+    if (method === "PUT") {
+      void handleUpdateDeck(req, res, deckId);
+      return;
+    }
+    if (method === "DELETE") {
+      void handleDeleteDeck(req, res, deckId);
+      return;
+    }
+  }
+
+  res.writeHead(404, { "Content-Type": "text/plain" });
+  res.end("Not found");
 });
 
 const wss = new WebSocketServer({ server: httpServer });

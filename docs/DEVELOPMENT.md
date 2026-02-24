@@ -92,7 +92,7 @@ The default deck is defined in `server/game/cards.ts` as `DEFAULT_DECK: { cardId
 ## 10. Security and persistence
 
 - **Server-authoritative cards:** The server is the only source of card definitions. In `server/game/state.ts`, every intent is validated: `cardInstanceId` and `attackerInstanceId` must exist in the current game state and belong to the acting player; the underlying `cardId` must be in the server catalog (`getCardTemplate`). Clients cannot invent cards or instances.
-- **Persistence layer:** `server/repository/` defines interfaces for user collections (e.g. `ICollectionRepository`: getCollection, grantCards, transferCard). The default implementation is in-memory (`InMemoryCollectionRepository`). When adding a database for packs/trading, implement the same interfaces against the DB and wire them in the WebSocket server; game logic stays in `server/game/`.
+- **Persistence layer:** `server/repository/` defines interfaces for user collections (e.g. `ICollectionRepository`: getCollection, grantCards, transferCard). The in-memory implementation (`InMemoryCollectionRepository`) is useful for tests and prototypes. The production-ready implementation uses **Postgres + Prisma** (`PrismaCollectionRepository`): see `server/prisma/schema.prisma` and `server/repository/prisma-collection-repository.ts`. Collection/deck features should depend on the repository interface, not on Prisma directly.
 
 ---
 
@@ -102,3 +102,22 @@ The default deck is defined in `server/game/cards.ts` as `DEFAULT_DECK: { cardId
 - [ ] New intents or message shapes are documented in `docs/GAME-RULES.md`.
 - [ ] “Where to change X” and data flow are still accurate in `docs/ARCHITECTURE.md` (or you updated them).
 - [ ] README and package scripts (e.g. `npm start`, `npm test`) still work.
+
+---
+
+## 12. Database & migrations (Postgres + Prisma)
+
+- **Local setup:** Use Postgres for development (e.g. Docker: `docker run --name tcg-postgres -e POSTGRES_PASSWORD=tcg -p 5432:5432 -d postgres`). Create a database (e.g. `tcg_dev`). Set `DATABASE_URL` in `server/.env`, e.g. `postgresql://postgres:tcg@localhost:5432/tcg_dev?schema=public`.
+- **Prisma schema:** The database schema is defined in `server/prisma/schema.prisma` (models: `User`, `OwnedCard`, `Deck`, `DeckCard`). The Prisma client is created in `server/prisma/client.ts`.
+- **Migrations:** From `server/`, run `npx prisma migrate dev --name <change-name>` when you change the schema. In production (e.g. Render), run `npx prisma migrate deploy` or `npx prisma db push` in the build or release step.
+- **Generating client:** Prisma Client is generated automatically on `npm install`. If needed, run `cd server && npx prisma generate`.
+- **Environment variables:** Set `DATABASE_URL` and `NEON_AUTH_BASE_URL` for the server. The latter is the Neon Auth base URL (from Neon Console → Auth → Configuration); required for JWT verification.
+
+---
+
+## 13. Neon Auth setup
+
+- **Enable Auth:** In your Neon project (same DB as `DATABASE_URL`), open the **Auth** page and click **Enable Auth**. Copy the **Auth Base URL** from the Configuration tab.
+- **Server:** Set `NEON_AUTH_BASE_URL=<auth-base-url>` in `server/.env` (no trailing slash). The server uses this to verify JWTs via the JWKS endpoint and does not expose register/login endpoints.
+- **Web:** Set `VITE_NEON_AUTH_URL=<auth-base-url>` in `web/.env` (copy from `web/.env.example`). The web client uses this for sign-in/sign-up and to obtain a JWT to send to the game server.
+- **CORS:** If the web app is served from a different origin than Neon Auth, ensure Neon Auth allows your app’s origin (Neon Console or auth config).

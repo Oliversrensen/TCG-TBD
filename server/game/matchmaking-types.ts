@@ -5,8 +5,9 @@
 
 import type { GameState } from "./types.js";
 
-/** Client → Server: matchmaking intents (send after connect, before or instead of game intents) */
+/** Client → Server: matchmaking/auth intents (send after connect, before or instead of game intents) */
 export type MatchmakingIntent =
+  | { type: "authenticate"; token: string }
   | { type: "join_queue" }
   | { type: "leave_queue" }
   | { type: "create_lobby" }
@@ -57,6 +58,19 @@ export interface MsgMatchmakingError {
   error: string;
 }
 
+/** Server → Client: result of authenticate request */
+export interface MsgAuthenticated {
+  type: "authenticated";
+  userId: string;
+  username: string;
+}
+
+/** Server → Client: authentication failed */
+export interface MsgAuthError {
+  type: "auth_error";
+  error: string;
+}
+
 /** Server → Client: game state (you are in a match) */
 export interface MsgGameState {
   type: "state";
@@ -73,4 +87,6 @@ export type ServerToClientMessage =
   | MsgLobbyJoined
   | MsgLobbyError
   | MsgMatchmakingError
+  | MsgAuthenticated
+  | MsgAuthError
   | MsgGameState;

@@ -19,7 +19,7 @@ This document is the primary context for understanding the codebase. Use it to l
 - **Security:** The server is the only source of card definitions. Clients never send card templates; they only reference `cardInstanceId` and `cardId` that the server has issued or validated. In `server/game/state.ts`, every intent is validated: instances must exist in the current game state and belong to the acting player; every `cardId` must be in the server catalog. No client can invent cards or instances.
 - **Card data:** Card definitions live in `server/game/cards.ts`. The web client receives read-only card data at build time via `scripts/generate-card-data.mjs`, which reads the compiled server output and writes `web/src/generated/cardData.ts`. Build the server before building the web app.
 - **Protocol:** WebSocket, one JSON message per frame. See [GAME-RULES.md](./GAME-RULES.md) for message shapes.
-- **Persistence:** Matchmaking and active game state are in-memory. A **repository layer** (`server/repository/`) defines interfaces for user collections (getCollection, grantCards, transferCard). The default implementation is in-memory; when adding a DB for packs/trading, implement the same interfaces against the DB.
+- **Persistence:** Matchmaking and active game state are in-memory. A **repository layer** (`server/repository/`) defines interfaces for user collections (getCollection, grantCards, transferCard). Implementations: in-memory (`InMemoryCollectionRepository`) and Postgres+Prisma (`PrismaCollectionRepository`, using `server/prisma/schema.prisma` and `server/prisma/client.ts`). Game rules in `server/game/` stay pure and DB-agnostic.
 
 ---
 
@@ -75,3 +75,18 @@ This document is the primary context for understanding the codebase. Use it to l
 - **Tests:** `cd server && npm test` (game core unit tests).
 
 See [README.md](../README.md) and [DEVELOPMENT.md](./DEVELOPMENT.md) for more detail.
+
+---
+
+## 7. Authentication and decks
+
+- **Neon Auth:** Authentication is provided by **Neon Auth** (Better Auth). Users sign up and sign in in the web client via Neon Auth (email + password). The server does not implement register/login endpoints; it only verifies JWTs issued by Neon Auth using JWKS (`server/auth/neon-auth.ts`). Enable Auth in your Neon project and set `NEON_AUTH_BASE_URL` (server) and `VITE_NEON_AUTH_URL` (web). See docs and `web/.env.example` for setup.
+- **JWT tokens:** JWTs are issued by Neon Auth. The server verifies them via the Neon Auth JWKS endpoint and extracts `sub` (user id) and optional `name`/`email`. Tokens are used for HTTP-protected routes (e.g. `/decks`) via `Authorization: Bearer <token>` and for WebSocket authentication.
+- **User sync:** On successful token verification, the server ensures a local `User` row exists (`server/auth/user-repository.ts`: `getOrCreateUserFromNeon`) so that decks and owned cards are keyed by the same user id. The `User` model has `id` (Neon user id) and `username` (display name from Neon).
+- **WebSocket auth:** After connecting, clients may send `{ type: "authenticate", token }` as a matchmaking intent (token from Neon Auth). On success the server sets `session.userId` / `session.username` and replies with `{ type: "authenticated", userId, username }`. On failure it replies `{ type: "auth_error", error }`. Sessions without `authenticate` remain guests and can still play matches. The client re-sends the stored token on reconnect when available.
+- **Deck API:** Authenticated users can manage decks via HTTP:
+  - `GET /decks` → `{ decks: [{ id, name, cards: { cardId, count }[] }] }`
+  - `POST /decks` → create a deck for the current user.
+  - `PUT /decks/:id` → update name and card list for a user-owned deck.
+  - `DELETE /decks/:id` → delete a user-owned deck.
+  These are backed by the `Deck` and `DeckCard` models in the Prisma schema. Game start currently still uses the default deck; future work can load a chosen deck and feed it into `createDeck`.

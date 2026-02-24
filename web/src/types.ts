@@ -29,8 +29,9 @@ export type GameIntent =
   | { type: "attack"; attackerInstanceId: string; targetId: string }
   | { type: "end_turn" };
 
-/** Matchmaking intents (send after connect) */
+/** Matchmaking/auth intents (send after connect) */
 export type MatchmakingIntent =
+  | { type: "authenticate"; token: string }
   | { type: "join_queue" }
   | { type: "leave_queue" }
   | { type: "create_lobby" }
@@ -75,6 +76,17 @@ export interface MsgMatchmakingError {
   error: string;
 }
 
+export interface MsgAuthenticated {
+  type: "authenticated";
+  userId: string;
+  username: string;
+}
+
+export interface MsgAuthError {
+  type: "auth_error";
+  error: string;
+}
+
 export interface MsgGameState {
   type: "state";
   state: GameState;
@@ -90,6 +102,8 @@ export type ServerMessage =
   | MsgLobbyJoined
   | MsgLobbyError
   | MsgMatchmakingError
+  | MsgAuthenticated
+  | MsgAuthError
   | MsgGameState;
 
 /** @deprecated use GameIntent */

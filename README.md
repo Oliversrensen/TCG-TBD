@@ -20,7 +20,7 @@ Then either:
 
 On PowerShell use `;` between commands. On bash/zsh you can use `&&`.
 
-In the web client: click **Join queue** (or **Create lobby** / **Join lobby** with a code). In the CLI you must send matchmaking intents after connect (see docs).
+In the web client: click **Join queue** (or **Create lobby** / **Join lobby** with a code). In the CLI you must send matchmaking intents after connect (see docs). **Auth (optional):** Sign-in and sign-up use **Neon Auth**; set `VITE_NEON_AUTH_URL` in `web/.env` and `NEON_AUTH_BASE_URL` in `server/.env` (see [Neon Auth setup](docs/DEVELOPMENT.md#13-neon-auth-setup)).
 
 ---
 
@@ -111,8 +111,8 @@ The repo includes a **Render Blueprint** so you can deploy the game server in a 
 
 You can also host the `server/` app on **Railway, Fly.io, or a VPS**. The server listens on `process.env.PORT` and exposes:
 
-- **HTTP** `GET /` → 200 (health check).
-- **WebSocket** on the same port (connect to `wss://your-host/`).
+- **HTTP** `GET /` → 200 (health check). No auth endpoints (auth is via Neon Auth).
+- **WebSocket** on the same port (connect to `wss://your-host/`). Clients send Neon-issued JWTs with `{ type: "authenticate", token }`; the server verifies them via Neon Auth JWKS.
 
 Point the web client at **`wss://your-host`** at build time:  
 `VITE_TCG_SERVER=wss://your-game-server.example.com npm run build` in `web/`, then serve `web/dist/` from any static host.

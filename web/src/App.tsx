@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useGame } from "./useGame";
 import { getCardTemplate } from "./cardData";
 import { cardName } from "./cardNames";
+import { authClient, getNeonAuthToken } from "./auth";
 import type { CardInstance } from "./types";
 
 const CARD_WIDTH = 90;
@@ -254,6 +255,11 @@ function MatchmakingScreen({
   matchmakingMessage,
   error,
   sendMatchmaking,
+  authUser,
+  authError,
+  onLogin,
+  onRegister,
+  onLogout,
 }: {
   connected: boolean;
   wsUrl: string;
@@ -262,8 +268,52 @@ function MatchmakingScreen({
   matchmakingMessage: string | null;
   error: string | null;
   sendMatchmaking: (intent: import("./types").MatchmakingIntent) => void;
+  authUser: { userId: string; username: string } | null;
+  authError: string | null;
+  onLogin: (email: string, password: string) => Promise<void> | void;
+  onRegister: (email: string, password: string, name: string) => Promise<void> | void;
+  onLogout: () => void;
 }) {
   const [codeInput, setCodeInput] = useState("");
+  const [authEmail, setAuthEmail] = useState("");
+  const [authName, setAuthName] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authSubmitting, setAuthSubmitting] = useState<"login" | "register" | null>(null);
+  const [authLocalError, setAuthLocalError] = useState<string | null>(null);
+
+  const handleAuth = async (mode: "login" | "register") => {
+    setAuthLocalError(null);
+    const email = authEmail.trim();
+    const password = authPassword;
+    if (!email || !password) {
+      setAuthLocalError("Email and password are required.");
+      return;
+    }
+    if (mode === "register") {
+      const name = authName.trim() || email.split("@")[0] || "User";
+      try {
+        setAuthSubmitting(mode);
+        await onRegister(email, password, name);
+        setAuthPassword("");
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "Sign up failed";
+        setAuthLocalError(msg);
+      } finally {
+        setAuthSubmitting(null);
+      }
+    } else {
+      try {
+        setAuthSubmitting(mode);
+        await onLogin(email, password);
+        setAuthPassword("");
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "Sign in failed";
+        setAuthLocalError(msg);
+      } finally {
+        setAuthSubmitting(null);
+      }
+    }
+  };
 
   return (
     <div style={{ padding: 24, maxWidth: 480, margin: "0 auto", fontFamily: "system-ui" }}>
@@ -272,6 +322,65 @@ function MatchmakingScreen({
         {connected ? "● Connected to " + wsUrl : "● Disconnected"}
       </p>
       {error && <p style={{ color: "#e74c3c", marginBottom: 8 }}>{error}</p>}
+
+      <div style={{ marginBottom: 24, padding: 12, borderRadius: 8, background: "#111827" }}>
+        {authUser ? (
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 13, color: "#a5b4fc" }}>Logged in as <strong>{authUser.username}</strong></span>
+            <button type="button" onClick={onLogout} style={{ padding: "4px 10px", fontSize: 12, cursor: "pointer" }}>
+              Log out
+            </button>
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <div style={{ fontSize: 13, color: "#e5e7eb" }}>Sign in or create an account (optional):</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <input
+                type="email"
+                placeholder="Email"
+                value={authEmail}
+                onChange={(e) => setAuthEmail(e.target.value)}
+                style={{ padding: 6, minWidth: 200, fontSize: 13 }}
+              />
+              <input
+                type="text"
+                placeholder="Display name (for sign up)"
+                value={authName}
+                onChange={(e) => setAuthName(e.target.value)}
+                style={{ padding: 6, minWidth: 200, fontSize: 13 }}
+              />
+              <input
+                type="password"
+                placeholder="Password"
+                value={authPassword}
+                onChange={(e) => setAuthPassword(e.target.value)}
+                style={{ padding: 6, minWidth: 200, fontSize: 13 }}
+              />
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  onClick={() => void handleAuth("login")}
+                  disabled={authSubmitting !== null || !connected}
+                  style={{ padding: "6px 12px", fontSize: 13 }}
+                >
+                  {authSubmitting === "login" ? "Signing in…" : "Sign in"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleAuth("register")}
+                  disabled={authSubmitting !== null || !connected}
+                  style={{ padding: "6px 12px", fontSize: 13 }}
+                >
+                  {authSubmitting === "register" ? "Signing up…" : "Sign up"}
+                </button>
+              </div>
+            </div>
+            {(authLocalError || authError) && (
+              <div style={{ fontSize: 12, color: "#fca5a5" }}>{authLocalError || authError}</div>
+            )}
+          </div>
+        )}
+      </div>
       {matchmakingMessage && (
         <p style={{ color: "#aaa", marginBottom: 16 }}>{matchmakingMessage}</p>
       )}
@@ -358,6 +467,8 @@ export default function App() {
     lobbyCode,
     matchmakingMessage,
     wsUrl,
+    authUser,
+    authError,
   } = useGame();
 
   const myIndex = playerIndex ?? 0;
@@ -377,6 +488,42 @@ export default function App() {
   };
   const handleEndTurn = () => {
     sendGame({ type: "end_turn" });
+  };
+
+  const storeTokenAndAuthenticate = async (token: string, username: string) => {
+    window.localStorage.setItem("tcg_token", token);
+    window.localStorage.setItem("tcg_username", username);
+    if (connected) {
+      sendMatchmaking({ type: "authenticate", token });
+    }
+  };
+
+  const handleLogin = async (email: string, password: string) => {
+    if (!authClient) throw new Error("Neon Auth is not configured. Set VITE_NEON_AUTH_URL.");
+    const result = await authClient.signIn.email({ email, password });
+    if (result.error) throw new Error(result.error.message || "Sign in failed");
+    const user = result.data?.user;
+    const username = user?.name ?? user?.email ?? email;
+    const token = await getNeonAuthToken();
+    if (!token) throw new Error("Could not get session token");
+    await storeTokenAndAuthenticate(token, username);
+  };
+
+  const handleRegister = async (email: string, password: string, name: string) => {
+    if (!authClient) throw new Error("Neon Auth is not configured. Set VITE_NEON_AUTH_URL.");
+    const result = await authClient.signUp.email({ email, password, name: name || email.split("@")[0] || "User" });
+    if (result.error) throw new Error(result.error.message || "Sign up failed");
+    const user = result.data?.user;
+    const username = user?.name ?? user?.email ?? email;
+    const token = await getNeonAuthToken();
+    if (!token) throw new Error("Could not get session token");
+    await storeTokenAndAuthenticate(token, username);
+  };
+
+  const handleLogout = async () => {
+    if (authClient) await authClient.signOut();
+    window.localStorage.removeItem("tcg_token");
+    window.localStorage.removeItem("tcg_username");
   };
 
   const [attackModeAttacker, setAttackModeAttacker] = useState<string | null>(null);
@@ -457,6 +604,11 @@ export default function App() {
         matchmakingMessage={matchmakingMessage}
         error={error}
         sendMatchmaking={sendMatchmaking}
+        authUser={authUser}
+        authError={authError}
+        onLogin={handleLogin}
+        onRegister={handleRegister}
+        onLogout={handleLogout}
       />
     );
   }

@@ -22,6 +22,8 @@ export function useGame() {
   const [matchmakingStatus, setMatchmakingStatus] = useState<MatchmakingStatus>("idle");
   const [lobbyCode, setLobbyCode] = useState<string | null>(null);
   const [matchmakingMessage, setMatchmakingMessage] = useState<string | null>(null);
+  const [authUser, setAuthUser] = useState<{ userId: string; username: string } | null>(null);
+  const [authError, setAuthError] = useState<string | null>(null);
   const [reconnectTrigger, setReconnectTrigger] = useState(0);
   const currentWsRef = useRef<WebSocket | null>(null);
 
@@ -37,10 +39,16 @@ export function useGame() {
     setMatchmakingMessage(null);
     setState(null);
     setPlayerIndex(null);
+    setAuthUser(null);
+    setAuthError(null);
 
     ws.onopen = () => {
       if (currentWsRef.current !== ws) return;
       setStatus("connected");
+      const token = typeof window !== "undefined" ? window.localStorage.getItem("tcg_token") : null;
+      if (token) {
+        ws.send(JSON.stringify({ type: "authenticate", token }));
+      }
     };
 
     ws.onmessage = (e) => {
@@ -83,6 +91,14 @@ export function useGame() {
             setMatchmakingMessage(msg.error);
             setError(msg.error);
             break;
+          case "authenticated":
+            setAuthUser({ userId: msg.userId, username: msg.username });
+            setAuthError(null);
+            break;
+          case "auth_error":
+            setAuthUser(null);
+            setAuthError(msg.error);
+            break;
           case "state":
             setState(msg.state);
             setPlayerIndex(msg.playerIndex);
@@ -104,6 +120,7 @@ export function useGame() {
       currentWsRef.current = null;
       setConn(null);
       setStatus("closed");
+      setAuthUser(null);
       if (ev.code === 4000 && ev.reason === "Game full") {
         setCloseReason(
           "Game full (2 players already connected). Use Join queue or a lobby code instead."
@@ -156,6 +173,8 @@ export function useGame() {
     state,
     playerIndex,
     error,
+    authUser,
+    authError,
     sendGame,
     sendMatchmaking,
     reconnect,

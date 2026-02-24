@@ -11,6 +11,7 @@
     "prebuild": "npm run generate:cards"
   },
   "dependencies": {
+    "@neondatabase/neon-js": "latest",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
