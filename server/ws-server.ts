@@ -64,11 +64,13 @@ function send(session: Session, msg: ServerToClientMessage): void {
 }
 
 function broadcastToMatch(match: Match, state: GameState, error?: string): void {
+  const opp0 = match.sessions[1]?.username ?? "Opponent";
+  const opp1 = match.sessions[0]?.username ?? "Opponent";
   if (match.sessions[0]) {
-    send(match.sessions[0], { type: "state", state, playerIndex: 0, error });
+    send(match.sessions[0], { type: "state", state, playerIndex: 0, error, opponentUsername: opp0 });
   }
   if (match.sessions[1]) {
-    send(match.sessions[1], { type: "state", state, playerIndex: 1, error });
+    send(match.sessions[1], { type: "state", state, playerIndex: 1, error, opponentUsername: opp1 });
   }
 }
 
@@ -76,6 +78,22 @@ function removeFromQueue(session: Session): void {
   const i = queue.indexOf(session);
   if (i !== -1) queue.splice(i, 1);
   if (session.status === "queued") session.status = "pending";
+}
+
+/** True if this user (by userId) already has another session in queue, a lobby, or an active match. */
+function isUserAlreadyInMatchmaking(currentSession: Session): boolean {
+  const uid = currentSession.userId;
+  if (!uid) return false;
+  if (queue.some((s) => s !== currentSession && s.userId === uid)) return true;
+  for (const lobby of lobbies.values()) {
+    if (lobby.creator !== currentSession && lobby.creator.userId === uid) return true;
+    if (lobby.joiner && lobby.joiner !== currentSession && lobby.joiner.userId === uid) return true;
+  }
+  for (const match of matches.values()) {
+    if (match.sessions[0] !== currentSession && match.sessions[0].userId === uid) return true;
+    if (match.sessions[1] !== currentSession && match.sessions[1].userId === uid) return true;
+  }
+  return false;
 }
 
 function removeFromLobby(session: Session): void {
@@ -115,6 +133,12 @@ function tryMatchFromQueue(): void {
   const s1 = queue.shift()!;
   removeFromQueue(s0);
   removeFromQueue(s1);
+
+  if (s0.userId && s1.userId && s0.userId === s1.userId) {
+    queue.push(s0, s1);
+    tryMatchFromQueue();
+    return;
+  }
 
   const matchId = "m_" + ++matchIdCounter;
   const gameState = createInitialState();
@@ -166,8 +190,16 @@ function handleMatchmaking(session: Session, raw: string): void {
   }
 
   if (intent.type === "join_queue") {
+    if (!session.userId) {
+      send(session, { type: "matchmaking_error", error: "You must sign in to play." });
+      return;
+    }
     if (session.status === "queued") {
       send(session, { type: "matchmaking_error", error: "Already in queue." });
+      return;
+    }
+    if (isUserAlreadyInMatchmaking(session)) {
+      send(session, { type: "matchmaking_error", error: "You are already in a queue or in a game. Use one window or leave first." });
       return;
     }
     removeFromLobby(session);
@@ -186,8 +218,16 @@ function handleMatchmaking(session: Session, raw: string): void {
   }
 
   if (intent.type === "create_lobby") {
+    if (!session.userId) {
+      send(session, { type: "matchmaking_error", error: "You must sign in to play." });
+      return;
+    }
     if (session.status === "in_lobby" && session.lobbyCode) {
       send(session, { type: "matchmaking_error", error: "Already in a lobby. Leave first." });
+      return;
+    }
+    if (isUserAlreadyInMatchmaking(session)) {
+      send(session, { type: "matchmaking_error", error: "You are already in a queue or in a game. Use one window or leave first." });
       return;
     }
     removeFromQueue(session);
@@ -213,6 +253,18 @@ function handleMatchmaking(session: Session, raw: string): void {
     }
     if (lobby.joiner) {
       send(session, { type: "lobby_error", error: "Lobby is full." });
+      return;
+    }
+    if (!session.userId) {
+      send(session, { type: "lobby_error", error: "You must sign in to play." });
+      return;
+    }
+    if (lobby.creator.userId && session.userId && lobby.creator.userId === session.userId) {
+      send(session, { type: "lobby_error", error: "You cannot join your own lobby." });
+      return;
+    }
+    if (isUserAlreadyInMatchmaking(session)) {
+      send(session, { type: "lobby_error", error: "You are already in a queue or in a game. Use one window or leave first." });
       return;
     }
     removeFromQueue(session);
@@ -258,11 +310,13 @@ function handleGameMessage(session: Session, raw: string): void {
   try {
     intent = JSON.parse(raw) as ClientIntent;
   } catch {
-    send(session, { type: "state", state: gameState, playerIndex: session.playerIndex, error: "Invalid JSON" });
+    const other = match.sessions[session.playerIndex === 0 ? 1 : 0];
+    send(session, { type: "state", state: gameState, playerIndex: session.playerIndex, error: "Invalid JSON", opponentUsername: other?.username ?? "Opponent" });
     return;
   }
   if (gameState.currentTurn !== session.playerIndex) {
-    send(session, { type: "state", state: gameState, playerIndex: session.playerIndex, error: "Not your turn" });
+    const other = match.sessions[session.playerIndex === 0 ? 1 : 0];
+    send(session, { type: "state", state: gameState, playerIndex: session.playerIndex, error: "Not your turn", opponentUsername: other?.username ?? "Opponent" });
     return;
   }
   try {

@@ -77,6 +77,7 @@ export interface MsgGameState {
   state: GameState;
   playerIndex: 0 | 1;
   error?: string;
+  opponentUsername?: string;
 }
 
 export type ServerToClientMessage =

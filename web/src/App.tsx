@@ -16,9 +16,10 @@ export interface TargetOption {
 function buildAttackTargets(
   oppIndex: 0 | 1,
   theirBoardIds: string[],
-  getCreatureName: (instanceId: string) => string
+  getCreatureName: (instanceId: string) => string,
+  opponentLabel: string = "Opponent"
 ): TargetOption[] {
-  const opts: TargetOption[] = [{ targetId: `hero-${oppIndex}`, label: "Enemy hero" }];
+  const opts: TargetOption[] = [{ targetId: `hero-${oppIndex}`, label: `${opponentLabel}'s hero` }];
   theirBoardIds.forEach((id) => opts.push({ targetId: id, label: getCreatureName(id) }));
   return opts;
 }
@@ -275,6 +276,7 @@ function MatchmakingScreen({
   onLogout: () => void;
 }) {
   const [codeInput, setCodeInput] = useState("");
+  const [authMode, setAuthMode] = useState<"login" | "signup">("login");
   const [authEmail, setAuthEmail] = useState("");
   const [authName, setAuthName] = useState("");
   const [authPassword, setAuthPassword] = useState("");
@@ -333,7 +335,9 @@ function MatchmakingScreen({
           </div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            <div style={{ fontSize: 13, color: "#e5e7eb" }}>Sign in or create an account (optional):</div>
+            <div style={{ fontSize: 13, color: "#e5e7eb" }}>
+              {authMode === "login" ? "Sign in to play:" : "Create an account:"}
+            </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               <input
                 type="email"
@@ -342,13 +346,15 @@ function MatchmakingScreen({
                 onChange={(e) => setAuthEmail(e.target.value)}
                 style={{ padding: 6, minWidth: 200, fontSize: 13 }}
               />
-              <input
-                type="text"
-                placeholder="Display name (for sign up)"
-                value={authName}
-                onChange={(e) => setAuthName(e.target.value)}
-                style={{ padding: 6, minWidth: 200, fontSize: 13 }}
-              />
+              {authMode === "signup" && (
+                <input
+                  type="text"
+                  placeholder="Display name"
+                  value={authName}
+                  onChange={(e) => setAuthName(e.target.value)}
+                  style={{ padding: 6, minWidth: 200, fontSize: 13 }}
+                />
+              )}
               <input
                 type="password"
                 placeholder="Password"
@@ -356,22 +362,24 @@ function MatchmakingScreen({
                 onChange={(e) => setAuthPassword(e.target.value)}
                 style={{ padding: 6, minWidth: 200, fontSize: 13 }}
               />
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                 <button
                   type="button"
-                  onClick={() => void handleAuth("login")}
+                  onClick={() => void handleAuth(authMode === "login" ? "login" : "register")}
                   disabled={authSubmitting !== null || !connected}
                   style={{ padding: "6px 12px", fontSize: 13 }}
                 >
-                  {authSubmitting === "login" ? "Signing in…" : "Sign in"}
+                  {authSubmitting === "login" ? "Signing in…" : authSubmitting === "register" ? "Signing up…" : authMode === "login" ? "Sign in" : "Sign up"}
                 </button>
                 <button
                   type="button"
-                  onClick={() => void handleAuth("register")}
-                  disabled={authSubmitting !== null || !connected}
-                  style={{ padding: "6px 12px", fontSize: 13 }}
+                  onClick={() => {
+                    setAuthMode((m) => (m === "login" ? "signup" : "login"));
+                    setAuthLocalError(null);
+                  }}
+                  style={{ padding: "6px 12px", fontSize: 12, background: "transparent", border: "none", color: "#93c5fd", cursor: "pointer", textDecoration: "underline" }}
                 >
-                  {authSubmitting === "register" ? "Signing up…" : "Sign up"}
+                  {authMode === "login" ? "Create an account" : "Already have an account? Sign in"}
                 </button>
               </div>
             </div>
@@ -385,7 +393,7 @@ function MatchmakingScreen({
         <p style={{ color: "#aaa", marginBottom: 16 }}>{matchmakingMessage}</p>
       )}
 
-      {matchmakingStatus === "idle" && (
+      {authUser && matchmakingStatus === "idle" && (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           <button
             type="button"
@@ -424,7 +432,11 @@ function MatchmakingScreen({
         </div>
       )}
 
-      {matchmakingStatus === "queued" && (
+      {!authUser && matchmakingStatus === "idle" && (
+        <p style={{ color: "#9ca3af", fontSize: 14 }}>Sign in above to join the queue or create or join a lobby.</p>
+      )}
+
+      {authUser && matchmakingStatus === "queued" && (
         <div>
           <p>Searching for an opponent…</p>
           <button
@@ -438,7 +450,7 @@ function MatchmakingScreen({
         </div>
       )}
 
-      {(matchmakingStatus === "lobby_host" || matchmakingStatus === "lobby_guest") && lobbyCode && (
+      {authUser && (matchmakingStatus === "lobby_host" || matchmakingStatus === "lobby_guest") && lobbyCode && (
         <div>
           <p><strong>Lobby code: {lobbyCode}</strong></p>
           <p style={{ fontSize: 14, color: "#888" }}>
@@ -469,6 +481,7 @@ export default function App() {
     wsUrl,
     authUser,
     authError,
+    opponentUsername,
   } = useGame();
 
   const myIndex = playerIndex ?? 0;
@@ -542,7 +555,7 @@ export default function App() {
 
   const spellTargetIds = new Set(["hero-0", "hero-1", ...boardIds.mine, ...boardIds.theirs]);
   const isSpellTargetId = (id: string) => spellTargetIds.has(id);
-  const attackTargets = buildAttackTargets(oppIndex as 0 | 1, boardIds.theirs, getCreatureName);
+  const attackTargets = buildAttackTargets(oppIndex as 0 | 1, boardIds.theirs, getCreatureName, opponentUsername ?? "Opponent");
   const isAttackTargetId = (id: string) => attackTargets.some((t) => t.targetId === id);
 
   const handleTargetClick = (targetId: string) => {
@@ -631,7 +644,7 @@ export default function App() {
           </div>
           <div style={{ padding: "8px 12px", background: "#1a1a2e", borderRadius: 8 }}>
             <span style={{ fontSize: 12, color: "#aaa" }}>Turn </span>
-            <span style={{ fontSize: 18 }}>{state.currentTurn === myIndex ? "You" : "Opponent"}</span>
+            <span style={{ fontSize: 18 }}>{state.currentTurn === myIndex ? "You" : (opponentUsername ?? "Opponent")}</span>
           </div>
           {state.winner !== null && (
             <div style={{ padding: "8px 16px", background: "#2d4a3e", borderRadius: 8, color: "#4caf50", fontSize: 18 }}>
@@ -652,7 +665,7 @@ export default function App() {
         )}
         <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 12 }}>
           <HeroBlock
-            label="Enemy hero"
+            label={`${opponentUsername ?? "Opponent"}'s hero`}
             health={oppPlayer?.heroHealth ?? 0}
             targetId={`hero-${oppIndex}`}
             isTarget={heroIsTarget(`hero-${oppIndex}`)}
@@ -660,7 +673,7 @@ export default function App() {
             onTarget={handleTargetClick}
           />
         </div>
-        <div style={{ fontSize: 12, color: "#aaa", marginBottom: 4 }}>Opponent&apos;s minions</div>
+        <div style={{ fontSize: 12, color: "#aaa", marginBottom: 4 }}>{opponentUsername ?? "Opponent"}&apos;s minions</div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", minHeight: 50 }}>
           {oppPlayer?.board.length === 0 && <span style={{ color: "#666" }}>No minions</span>}
           {oppPlayer?.board.map((c) => (

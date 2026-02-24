@@ -24,6 +24,7 @@ export function useGame() {
   const [matchmakingMessage, setMatchmakingMessage] = useState<string | null>(null);
   const [authUser, setAuthUser] = useState<{ userId: string; username: string } | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [opponentUsername, setOpponentUsername] = useState<string | null>(null);
   const [reconnectTrigger, setReconnectTrigger] = useState(0);
   const currentWsRef = useRef<WebSocket | null>(null);
 
@@ -103,6 +104,7 @@ export function useGame() {
             setState(msg.state);
             setPlayerIndex(msg.playerIndex);
             setError(msg.error ?? null);
+            setOpponentUsername(msg.opponentUsername ?? null);
             setMatchmakingStatus("idle");
             setLobbyCode(null);
             setMatchmakingMessage(null);
@@ -175,6 +177,7 @@ export function useGame() {
     error,
     authUser,
     authError,
+    opponentUsername,
     sendGame,
     sendMatchmaking,
     reconnect,
