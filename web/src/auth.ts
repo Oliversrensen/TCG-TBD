@@ -13,7 +13,7 @@ export async function getNeonAuthToken(): Promise<string | null> {
   if (!authUrl) return null;
   const base = authUrl.replace(/\/$/, "");
   try {
-    const res = await fetch(`${base}/api/auth/token`, { credentials: "include" });
+    const res = await fetch(`${base}/token`, { credentials: "include" });
     if (!res.ok) return null;
     const data = (await res.json()) as { token?: string };
     return data?.token ?? null;

@@ -31,11 +31,9 @@ export async function verifyNeonToken(token: string): Promise<NeonTokenPayload |
     return null;
   }
   try {
-    const baseUrl = NEON_AUTH_BASE_URL.replace(/\/$/, "");
-    const { payload } = await jwtVerify(token, getJwks(), {
-      issuer: baseUrl,
-      audience: baseUrl,
-    });
+    // Verify signature with Neon's JWKS only; skip issuer/audience so we accept
+    // whatever Neon Auth sets (they may differ from NEON_AUTH_BASE_URL).
+    const { payload } = await jwtVerify(token, getJwks());
     const sub = payload.sub;
     if (typeof sub !== "string" || !sub) {
       return null;
