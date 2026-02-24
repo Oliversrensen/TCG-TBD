@@ -1,0 +1,13 @@
+{
+  "name": "tcg",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "build": "npm run build --workspace=server",
+    "test": "npm test --workspace=server",
+    "smoke": "node run-smoke.js",
+    "start:server": "npm start --workspace=server",
+    "start:cli": "node cli/index.js"
+  },
+  "workspaces": ["server", "cli", "web"]
+}

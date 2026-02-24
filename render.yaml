@@ -1,0 +1,12 @@
+# Render Blueprint: deploy the TCG game server as a Web Service.
+# See https://docs.render.com/blueprint-spec
+# After pushing to GitHub/GitLab, connect the repo in Render and use "New Blueprint Instance".
+
+services:
+  - type: web
+    runtime: node
+    name: tcg-server
+    rootDir: server
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /
