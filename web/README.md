@@ -14,10 +14,10 @@ npm install
 npm run dev
 ```
 
-Opens at http://localhost:5173. Connect to game server at `ws://localhost:8765` by default. To use another server:
+Opens at http://localhost:5173. Connect to game server at `ws://localhost:8765` by default. To use a different server (e.g. Render):
 
-- Create `.env` in `web/` with: `VITE_TCG_SERVER=ws://localhost:8766`
-- Or set when running: `VITE_TCG_SERVER=ws://your-server npm run dev`
+- Copy `web/.env.example` to `web/.env` and set `VITE_TCG_SERVER=wss://your-app.onrender.com` (or any `ws://` / `wss://` URL).
+- `.env` is gitignored; use `.env.example` as a template.
 
 ## Build
 

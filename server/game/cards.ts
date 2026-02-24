@@ -17,6 +17,15 @@ export const CARD_TEMPLATES: CardTemplate[] = [
     health: 2,
   },
   {
+    id: "shieldbearer",
+    name: "Shieldbearer",
+    type: "creature",
+    cost: 2,
+    attack: 0,
+    health: 4,
+    keywords: ["Taunt"],
+  },
+  {
     id: "ogre",
     name: "Ogre",
     type: "creature",
@@ -59,19 +68,33 @@ export function getCardTemplate(cardId: string): CardTemplate | undefined {
  * are drawn first; order drawn = fireball, ogre, frostbolt, murloc, murloc → hand[0]=murloc, etc.
  * Last 5 = murloc, murloc, frostbolt, ogre, fireball so initial hand matches test expectations.
  */
-const DECK_CARD_IDS = [
-  "dragon",
-  "frostbolt",
-  "fireball",
-  "ogre",
-  "murloc",
-  "murloc",
-  "frostbolt",
-  "ogre",
-  "fireball",
-  "murloc",
-  "murloc",
+/**
+ * Deck definition: card id and count. Order matters: we draw from the end of the expanded list,
+ * so the last entries here are drawn first. To keep tests happy, the last 5 drawn are
+ * murloc, murloc, frostbolt, ogre, fireball.
+ */
+export const DEFAULT_DECK: { cardId: string; count: number }[] = [
+  { cardId: "dragon", count: 1 },
+  { cardId: "shieldbearer", count: 2 },
+  { cardId: "murloc", count: 2 },
+  { cardId: "frostbolt", count: 1 },
+  { cardId: "ogre", count: 1 },
+  { cardId: "fireball", count: 1 },
+  { cardId: "frostbolt", count: 1 },
+  { cardId: "ogre", count: 1 },
+  { cardId: "fireball", count: 1 },
+  { cardId: "murloc", count: 2 },
 ];
+
+function expandDeckList(): string[] {
+  const list: string[] = [];
+  for (const { cardId, count } of DEFAULT_DECK) {
+    for (let i = 0; i < count; i++) list.push(cardId);
+  }
+  return list;
+}
+
+const DECK_CARD_IDS = expandDeckList();
 
 let instanceCounter = 0;
 function nextInstanceId(prefix: string): string {

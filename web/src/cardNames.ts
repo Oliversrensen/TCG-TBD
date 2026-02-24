@@ -1,12 +1,8 @@
-/** Card id → display name. Align with server/game/cards.ts CARD_TEMPLATES. */
-export const CARD_NAMES: Record<string, string> = {
-  murloc: "Murloc",
-  ogre: "Ogre",
-  dragon: "Dragon",
-  fireball: "Fireball",
-  frostbolt: "Frostbolt",
-};
+/**
+ * Card display names. Derived from server-authoritative card data (generated from server/game/cards.ts).
+ */
+import { getCardTemplate } from "./cardData";
 
 export function cardName(cardId: string): string {
-  return CARD_NAMES[cardId] ?? cardId;
+  return getCardTemplate(cardId)?.name ?? cardId;
 }

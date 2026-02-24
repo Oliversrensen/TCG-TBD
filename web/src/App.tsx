@@ -1,140 +1,247 @@
 import { useState } from "react";
 import { useGame } from "./useGame";
+import { getCardTemplate } from "./cardData";
 import { cardName } from "./cardNames";
-import type { PlayerState, CardInstance } from "./types";
+import type { CardInstance } from "./types";
 
-function HeroBlock({ label, health }: { label: string; health: number }) {
-  return (
-    <div style={{ padding: 8, background: "#1a1a2e", borderRadius: 8 }}>
-      <div style={{ fontSize: 12, color: "#aaa" }}>{label}</div>
-      <div style={{ fontSize: 24 }}>❤️ {health}</div>
-    </div>
-  );
+const CARD_WIDTH = 90;
+const CARD_HEIGHT = Math.round(CARD_WIDTH * (3.5 / 2.5));
+
+export interface TargetOption {
+  targetId: string;
+  label: string;
 }
 
-function Board({ player, label }: { player: PlayerState; label: string }) {
+function buildAttackTargets(
+  oppIndex: 0 | 1,
+  theirBoardIds: string[],
+  getCreatureName: (instanceId: string) => string
+): TargetOption[] {
+  const opts: TargetOption[] = [{ targetId: `hero-${oppIndex}`, label: "Enemy hero" }];
+  theirBoardIds.forEach((id) => opts.push({ targetId: id, label: getCreatureName(id) }));
+  return opts;
+}
+
+const cardShape = {
+  width: CARD_WIDTH,
+  height: CARD_HEIGHT,
+  borderRadius: 8,
+  padding: 6,
+  boxSizing: "border-box" as const,
+  display: "flex",
+  flexDirection: "column" as const,
+  border: "1px solid #444",
+};
+
+function HeroBlock({
+  label,
+  health,
+  targetId,
+  isTarget,
+  targetKind,
+  onTarget,
+}: {
+  label: string;
+  health: number;
+  targetId?: string;
+  isTarget?: boolean;
+  targetKind?: "spell" | "attack";
+  onTarget?: (id: string) => void;
+}) {
+  const clickable = isTarget && onTarget && targetId;
+  const borderColor = targetKind === "spell" ? "#4fc3f7" : targetKind === "attack" ? "#ff9800" : "#333";
   return (
-    <div style={{ marginBottom: 12 }}>
-      <div style={{ fontSize: 12, color: "#aaa", marginBottom: 4 }}>{label}</div>
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", minHeight: 60 }}>
-        {player.board.length === 0 && (
-          <span style={{ color: "#666" }}>No creatures</span>
-        )}
-        {player.board.map((c) => (
-          <div
-            key={c.instanceId}
-            style={{
-              padding: "8px 12px",
-              background: "#16213e",
-              borderRadius: 8,
-              border: "1px solid #333",
-            }}
-          >
-            <div>{cardName(c.cardId)}</div>
-            <div style={{ fontSize: 12, color: "#888" }}>
-              HP: {c.currentHealth ?? "?"}
-              {c.attackedThisTurn && " • Attacked"}
-            </div>
-          </div>
-        ))}
-      </div>
+    <div
+      role={clickable ? "button" : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      onClick={clickable ? () => onTarget!(targetId!) : undefined}
+      onKeyDown={clickable ? (e) => e.key === "Enter" && onTarget?.(targetId!) : undefined}
+      style={{
+        padding: "12px 20px",
+        background: isTarget ? "#2a3f5f" : "#1a1a2e",
+        borderRadius: 12,
+        border: isTarget ? `2px solid ${borderColor}` : "1px solid #333",
+        cursor: clickable ? "pointer" : "default",
+        minWidth: 120,
+        textAlign: "center",
+      }}
+    >
+      <div style={{ fontSize: 12, color: "#aaa" }}>{label}</div>
+      <div style={{ fontSize: 22 }}>❤️ {health}</div>
+      {isTarget && <div style={{ fontSize: 10, color: borderColor, marginTop: 4 }}>Click to target</div>}
     </div>
   );
 }
 
 function HandCard({
   card,
+  template,
   canPlay,
+  manaRemaining,
   onPlayCreature,
-  onPlaySpell,
-  targetIds,
+  onStartSpellTarget,
+  isSpellTargetMode,
 }: {
   card: CardInstance;
+  template: ReturnType<typeof getCardTemplate>;
   canPlay: boolean;
+  manaRemaining: number;
   onPlayCreature: (id: string) => void;
-  onPlaySpell: (id: string, targetId: string) => void;
-  targetIds: string[];
+  onStartSpellTarget: (cardInstanceId: string) => void;
+  isSpellTargetMode: boolean;
 }) {
-  const name = cardName(card.cardId);
-  const isCreature = ["murloc", "ogre", "dragon"].includes(card.cardId);
-  const isSpell = ["fireball", "frostbolt"].includes(card.cardId);
+  if (!template) return null;
+  const canAfford = canPlay && manaRemaining >= template.cost;
+  const isCreature = template.type === "creature";
+  const isSpell = template.type === "spell";
+  const isThisSpellSelected = isSpellTargetMode; // we only show "Click a target above" when this card triggered spell mode; parent passes isSpellTargetMode when spellTargetCardInstanceId === card.instanceId
 
   return (
     <div
       style={{
-        padding: "8px 12px",
-        background: canPlay ? "#16213e" : "#111",
-        borderRadius: 8,
-        border: "1px solid #333",
+        ...cardShape,
+        background: canAfford ? "linear-gradient(145deg, #1e3a5f 0%, #16213e 100%)" : "#0d1117",
+        opacity: canAfford ? 1 : 0.85,
+        border: isThisSpellSelected ? "2px solid #4fc3f7" : undefined,
       }}
     >
-      <div>{name}</div>
-      {canPlay && isCreature && (
-        <button type="button" onClick={() => onPlayCreature(card.instanceId)} style={{ marginTop: 4 }}>
-          Play
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+        <span
+          style={{
+            width: 22,
+            height: 22,
+            borderRadius: "50%",
+            background: "#0f3460",
+            color: "#fff",
+            fontSize: 12,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontWeight: "bold",
+          }}
+        >
+          {template.cost}
+        </span>
+      </div>
+      <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, textAlign: "center", lineHeight: 1.2 }}>
+        {template.name}
+      </div>
+      <div style={{ fontSize: 10, color: "#aaa", textAlign: "center" }}>
+        {isCreature && `${template.attack}/${template.health}`}
+        {isSpell && `Spell ${template.spellPower}`}
+      </div>
+      <div style={{ marginTop: 4 }}>
+        {canAfford && isCreature && (
+          <button type="button" onClick={() => onPlayCreature(card.instanceId)} style={{ width: "100%", padding: "4px 0", fontSize: 10, cursor: "pointer" }}>
+            Play
+          </button>
+        )}
+        {canAfford && isSpell && (
+          <button type="button" onClick={() => onStartSpellTarget(card.instanceId)} style={{ width: "100%", padding: "4px 0", fontSize: 10, cursor: "pointer" }}>
+            {isThisSpellSelected ? "Click a target above" : "Choose target"}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function MyBoardCreature({
+  card,
+  template,
+  canAttack,
+  attacked,
+  onStartAttack,
+  isSelectedAttacker,
+  isSpellTarget,
+  onSpellTarget,
+}: {
+  card: CardInstance;
+  template: ReturnType<typeof getCardTemplate>;
+  canAttack: boolean;
+  attacked: boolean;
+  onStartAttack: (id: string) => void;
+  isSelectedAttacker: boolean;
+  isSpellTarget?: boolean;
+  onSpellTarget?: (id: string) => void;
+}) {
+  if (!template) return null;
+  const health = card.currentHealth ?? template.health ?? 0;
+  const clickableAsSpellTarget = isSpellTarget && onSpellTarget;
+  return (
+    <div
+      role={clickableAsSpellTarget ? "button" : undefined}
+      tabIndex={clickableAsSpellTarget ? 0 : undefined}
+      onClick={clickableAsSpellTarget ? () => onSpellTarget?.(card.instanceId) : undefined}
+      onKeyDown={clickableAsSpellTarget ? (e) => e.key === "Enter" && onSpellTarget?.(card.instanceId) : undefined}
+      style={{
+        ...cardShape,
+        background: isSelectedAttacker ? "linear-gradient(145deg, #2d4a3e 0%, #1e3a2f 100%)" : "linear-gradient(145deg, #1e3a5f 0%, #16213e 100%)",
+        border: isSelectedAttacker ? "2px solid #4caf50" : isSpellTarget ? "2px solid #4fc3f7" : "1px solid #444",
+        cursor: clickableAsSpellTarget ? "pointer" : "default",
+      }}
+    >
+      <div style={{ fontSize: 10, color: "#888" }}>{template.cost}</div>
+      <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, textAlign: "center" }}>
+        {template.name}
+      </div>
+      {template.keywords?.length ? <div style={{ fontSize: 9, color: "#b8a" }}>{template.keywords.join(" ")}</div> : null}
+      <div style={{ display: "flex", justifyContent: "space-around", fontSize: 11 }}>
+        <span>⚔️ {template.attack}</span>
+        <span>❤️ {health}</span>
+      </div>
+      {attacked && <div style={{ fontSize: 9, color: "#888" }}>Attacked</div>}
+      {isSpellTarget && <div style={{ fontSize: 9, color: "#4fc3f7" }}>Click to target</div>}
+      {canAttack && !attacked && !isSpellTarget && (
+        <button type="button" onClick={(e) => { e.stopPropagation(); onStartAttack(card.instanceId); }} style={{ fontSize: 9, marginTop: 2, cursor: "pointer" }}>
+          {isSelectedAttacker ? "Click enemy above" : "Attack"}
         </button>
-      )}
-      {canPlay && isSpell && (
-        <div style={{ marginTop: 4, fontSize: 11 }}>
-          Target:{" "}
-          {targetIds.map((tid) => (
-            <button
-              key={tid}
-              type="button"
-              onClick={() => onPlaySpell(card.instanceId, tid)}
-              style={{ marginRight: 4 }}
-            >
-              {tid}
-            </button>
-          ))}
-        </div>
       )}
     </div>
   );
 }
 
-function BoardCreature({
+function OpponentCreatureAsTarget({
   card,
-  canAttack,
-  onAttack,
-  targetIds,
+  template,
+  isAttackTarget,
+  isSpellTarget,
+  onTarget,
 }: {
   card: CardInstance;
-  canAttack: boolean;
-  onAttack: (attackerId: string, targetId: string) => void;
-  targetIds: string[];
+  template: ReturnType<typeof getCardTemplate>;
+  isAttackTarget: boolean;
+  isSpellTarget: boolean;
+  onTarget?: (id: string) => void;
 }) {
-  const name = cardName(card.cardId);
-  const attacked = card.attackedThisTurn ?? false;
+  if (!template) return null;
+  const health = card.currentHealth ?? template.health ?? 0;
+  const clickable = (isAttackTarget || isSpellTarget) && onTarget;
+  const borderColor = isSpellTarget ? "#4fc3f7" : isAttackTarget ? "#ff9800" : "#444";
+  const hint = isSpellTarget ? "Click to target" : isAttackTarget ? "Click to attack" : null;
   return (
     <div
+      role={clickable ? "button" : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      onClick={clickable ? () => onTarget?.(card.instanceId) : undefined}
+      onKeyDown={clickable ? (e) => e.key === "Enter" && onTarget?.(card.instanceId) : undefined}
       style={{
-        padding: "8px 12px",
-        background: "#16213e",
-        borderRadius: 8,
-        border: "1px solid #333",
+        ...cardShape,
+        background: "linear-gradient(145deg, #1e3a5f 0%, #16213e 100%)",
+        border: clickable ? `2px solid ${borderColor}` : "1px solid #444",
+        cursor: clickable ? "pointer" : "default",
       }}
     >
-      <div>{name}</div>
-      <div style={{ fontSize: 12, color: "#888" }}>
-        HP: {card.currentHealth ?? "?"}
-        {attacked && " • Attacked"}
+      <div style={{ fontSize: 10, color: "#888" }}>{template.cost}</div>
+      <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, textAlign: "center" }}>
+        {template.name}
       </div>
-      {canAttack && !attacked && targetIds.length > 0 && (
-        <div style={{ marginTop: 4, fontSize: 11 }}>
-          Attack:{" "}
-          {targetIds.map((tid) => (
-            <button
-              key={tid}
-              type="button"
-              onClick={() => onAttack(card.instanceId, tid)}
-              style={{ marginRight: 4 }}
-            >
-              {tid}
-            </button>
-          ))}
-        </div>
-      )}
+      {template.keywords?.length ? <div style={{ fontSize: 9, color: "#b8a" }}>{template.keywords.join(" ")}</div> : null}
+      <div style={{ display: "flex", justifyContent: "space-around", fontSize: 11 }}>
+        <span>⚔️ {template.attack}</span>
+        <span>❤️ {health}</span>
+      </div>
+      {hint && <div style={{ fontSize: 9, color: borderColor }}>{hint}</div>}
     </div>
   );
 }
@@ -272,10 +379,39 @@ export default function App() {
     sendGame({ type: "end_turn" });
   };
 
+  const [attackModeAttacker, setAttackModeAttacker] = useState<string | null>(null);
+  const [spellTargetCardInstanceId, setSpellTargetCardInstanceId] = useState<string | null>(null);
+
   const boardIds = {
     mine: myPlayer?.board.map((c) => c.instanceId) ?? [],
     theirs: oppPlayer?.board.map((c) => c.instanceId) ?? [],
   };
+
+  const getCreatureName = (instanceId: string): string => {
+    const allCards = [...(myPlayer?.board ?? []), ...(myPlayer?.hand ?? []), ...(oppPlayer?.board ?? []), ...(oppPlayer?.hand ?? [])];
+    const c = allCards.find((x) => x.instanceId === instanceId);
+    return c ? cardName(c.cardId) : instanceId;
+  };
+
+  const spellTargetIds = new Set(["hero-0", "hero-1", ...boardIds.mine, ...boardIds.theirs]);
+  const isSpellTargetId = (id: string) => spellTargetIds.has(id);
+  const attackTargets = buildAttackTargets(oppIndex as 0 | 1, boardIds.theirs, getCreatureName);
+  const isAttackTargetId = (id: string) => attackTargets.some((t) => t.targetId === id);
+
+  const handleTargetClick = (targetId: string) => {
+    if (spellTargetCardInstanceId) {
+      handlePlaySpell(spellTargetCardInstanceId, targetId);
+      setSpellTargetCardInstanceId(null);
+    } else if (attackModeAttacker) {
+      handleAttackTarget(targetId);
+    }
+  };
+
+  const heroIsSpellTarget = (targetId: string) => !!spellTargetCardInstanceId && (targetId === "hero-0" || targetId === "hero-1");
+  const heroIsAttackTarget = (targetId: string) => !!attackModeAttacker && targetId === `hero-${oppIndex}`;
+  const heroIsTarget = (targetId: string) => heroIsSpellTarget(targetId) || heroIsAttackTarget(targetId);
+  const heroTargetKind = (targetId: string): "spell" | "attack" | undefined =>
+    heroIsSpellTarget(targetId) ? "spell" : heroIsAttackTarget(targetId) ? "attack" : undefined;
 
   if (status === "closed" || status === "error") {
     return (
@@ -325,84 +461,131 @@ export default function App() {
     );
   }
 
+  const handleAttackTarget = (targetId: string) => {
+    if (attackModeAttacker) {
+      handleAttack(attackModeAttacker, targetId);
+      setAttackModeAttacker(null);
+    }
+  };
+
   return (
-    <div style={{ padding: 24, maxWidth: 900, margin: "0 auto", fontFamily: "system-ui" }}>
-      <h1>TCG</h1>
-      {error && (
-        <p style={{ color: "#e74c3c", marginBottom: 8 }}>{error}</p>
-      )}
-      <div style={{ display: "flex", gap: 24, marginBottom: 16 }}>
-        <HeroBlock label="Opponent" health={oppPlayer?.heroHealth ?? 0} />
-        <HeroBlock label="You" health={myPlayer?.heroHealth ?? 0} />
-        <div style={{ padding: 8 }}>
-          <div style={{ fontSize: 12, color: "#aaa" }}>Mana</div>
-          <div style={{ fontSize: 24 }}>{state.manaRemaining} / 10</div>
-        </div>
-        <div style={{ padding: 8 }}>
-          <div style={{ fontSize: 12, color: "#aaa" }}>Turn</div>
-          <div style={{ fontSize: 24 }}>
-            {state.currentTurn === myIndex ? "You" : "Opponent"}
+    <div style={{ padding: 24, maxWidth: 960, margin: "0 auto", fontFamily: "system-ui" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 12 }}>
+        <h1 style={{ margin: 0 }}>TCG</h1>
+        <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
+          <div style={{ padding: "8px 12px", background: "#1a1a2e", borderRadius: 8 }}>
+            <span style={{ fontSize: 12, color: "#aaa" }}>Mana </span>
+            <span style={{ fontSize: 20, fontWeight: "bold" }}>{state.manaRemaining} / 10</span>
           </div>
-        </div>
-        {state.winner !== null && (
-          <div style={{ padding: 8, color: "#2ecc71", fontSize: 20 }}>
-            {state.winner === myIndex ? "You win!" : "You lose!"}
+          <div style={{ padding: "8px 12px", background: "#1a1a2e", borderRadius: 8 }}>
+            <span style={{ fontSize: 12, color: "#aaa" }}>Turn </span>
+            <span style={{ fontSize: 18 }}>{state.currentTurn === myIndex ? "You" : "Opponent"}</span>
           </div>
-        )}
-      </div>
-
-      <Board player={oppPlayer!} label="Opponent board" />
-
-      <div style={{ marginBottom: 12 }}>
-        <div style={{ fontSize: 12, color: "#aaa", marginBottom: 4 }}>Your board</div>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", minHeight: 60 }}>
-          {myPlayer?.board.length === 0 && (
-            <span style={{ color: "#666" }}>No creatures</span>
+          {state.winner !== null && (
+            <div style={{ padding: "8px 16px", background: "#2d4a3e", borderRadius: 8, color: "#4caf50", fontSize: 18 }}>
+              {state.winner === myIndex ? "You win!" : "You lose!"}
+            </div>
           )}
-          {myPlayer?.board.map((c) => (
-            <BoardCreature
+        </div>
+      </div>
+      {error && <p style={{ color: "#e74c3c", marginBottom: 8 }}>{error}</p>}
+
+      {/* Opponent side (top) */}
+      <div style={{ background: "rgba(0,0,0,0.2)", borderRadius: 12, padding: 16, marginBottom: 16 }}>
+        {spellTargetCardInstanceId && (
+          <p style={{ fontSize: 12, color: "#4fc3f7", marginBottom: 8 }}>
+            Choose a target for your spell (hero or minion).
+            <button type="button" onClick={() => setSpellTargetCardInstanceId(null)} style={{ marginLeft: 12, padding: "2px 8px", cursor: "pointer" }}>Cancel</button>
+          </p>
+        )}
+        <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 12 }}>
+          <HeroBlock
+            label="Enemy hero"
+            health={oppPlayer?.heroHealth ?? 0}
+            targetId={`hero-${oppIndex}`}
+            isTarget={heroIsTarget(`hero-${oppIndex}`)}
+            targetKind={heroTargetKind(`hero-${oppIndex}`)}
+            onTarget={handleTargetClick}
+          />
+        </div>
+        <div style={{ fontSize: 12, color: "#aaa", marginBottom: 4 }}>Opponent&apos;s minions</div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", minHeight: 50 }}>
+          {oppPlayer?.board.length === 0 && <span style={{ color: "#666" }}>No minions</span>}
+          {oppPlayer?.board.map((c) => (
+            <OpponentCreatureAsTarget
               key={c.instanceId}
               card={c}
-              canAttack={isMyTurn && state.winner === null}
-              onAttack={handleAttack}
-              targetIds={[`hero-${oppIndex}`, ...boardIds.theirs]}
+              template={getCardTemplate(c.cardId)}
+              isAttackTarget={!!attackModeAttacker && isAttackTargetId(c.instanceId)}
+              isSpellTarget={!!spellTargetCardInstanceId && isSpellTargetId(c.instanceId)}
+              onTarget={handleTargetClick}
             />
           ))}
         </div>
       </div>
 
-      <div style={{ marginTop: 16 }}>
-        <div style={{ fontSize: 12, color: "#aaa", marginBottom: 4 }}>
+      {/* Your side (bottom): your board, your hero, your hand */}
+      <div style={{ background: "rgba(0,0,0,0.15)", borderRadius: 12, padding: 16 }}>
+        <div style={{ fontSize: 12, color: "#aaa", marginBottom: 4 }}>Your minions</div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", minHeight: 50, marginBottom: 16 }}>
+          {myPlayer?.board.length === 0 && <span style={{ color: "#666" }}>No minions</span>}
+          {myPlayer?.board.map((c) => (
+            <MyBoardCreature
+              key={c.instanceId}
+              card={c}
+              template={getCardTemplate(c.cardId)}
+              canAttack={isMyTurn && state.winner === null && attackTargets.length > 0}
+              attacked={c.attackedThisTurn ?? false}
+              onStartAttack={setAttackModeAttacker}
+              isSelectedAttacker={attackModeAttacker === c.instanceId}
+              isSpellTarget={!!spellTargetCardInstanceId && isSpellTargetId(c.instanceId)}
+              onSpellTarget={spellTargetCardInstanceId ? handleTargetClick : undefined}
+            />
+          ))}
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 16 }}>
+          <HeroBlock
+            label="Your hero"
+            health={myPlayer?.heroHealth ?? 0}
+            targetId={`hero-${myIndex}`}
+            isTarget={heroIsTarget(`hero-${myIndex}`)}
+            targetKind={heroTargetKind(`hero-${myIndex}`)}
+            onTarget={handleTargetClick}
+          />
+        </div>
+
+        <div style={{ fontSize: 12, color: "#aaa", marginBottom: 8 }}>
           Your hand (deck: {myPlayer?.deck.length ?? 0})
         </div>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           {myPlayer?.hand.map((c) => (
             <HandCard
               key={c.instanceId}
               card={c}
+              template={getCardTemplate(c.cardId)}
               canPlay={isMyTurn && state.winner === null}
+              manaRemaining={state.manaRemaining}
               onPlayCreature={handlePlayCreature}
-              onPlaySpell={handlePlaySpell}
-              targetIds={["hero-0", "hero-1", ...boardIds.mine, ...boardIds.theirs]}
+              onStartSpellTarget={setSpellTargetCardInstanceId}
+              isSpellTargetMode={spellTargetCardInstanceId === c.instanceId}
             />
           ))}
         </div>
+
+        {isMyTurn && (
+          <button
+            type="button"
+            onClick={handleEndTurn}
+            style={{ marginTop: 16, padding: "10px 24px", fontSize: 16, cursor: "pointer" }}
+          >
+            End turn
+          </button>
+        )}
       </div>
 
-      {isMyTurn && (
-        <button
-          type="button"
-          onClick={handleEndTurn}
-          style={{ marginTop: 16, padding: "8px 16px" }}
-        >
-          End turn
-        </button>
-      )}
-
       {state.lastAction && (
-        <p style={{ marginTop: 16, fontSize: 12, color: "#888" }}>
-          Last: {state.lastAction}
-        </p>
+        <p style={{ marginTop: 12, fontSize: 12, color: "#888" }}>Last: {state.lastAction}</p>
       )}
     </div>
   );

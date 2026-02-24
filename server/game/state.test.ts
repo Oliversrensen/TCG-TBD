@@ -278,6 +278,28 @@ describe("applyAction", () => {
       expect((r as { error: string }).error).toContain("Invalid target");
     });
 
+    it("Taunt: must attack Taunt creature when enemy has one", () => {
+      let s = createInitialState();
+      const p0Murloc = s.players[0].hand.find((c) => c.cardId === "murloc")!;
+      let r = applyAction(s, 0, { type: "play_creature", cardInstanceId: p0Murloc.instanceId });
+      if (!r.ok) return;
+      s = r.state;
+      // Put a Taunt (Shieldbearer) on enemy board so we must attack it first (still player 0's turn)
+      s.players[1].board.push({
+        instanceId: "p1-taunt-1",
+        cardId: "shieldbearer",
+        currentHealth: 4,
+        attackedThisTurn: false,
+      });
+      const attackerId = s.players[0].board[0].instanceId;
+      const tauntId = "p1-taunt-1";
+      r = applyAction(s, 0, { type: "attack", attackerInstanceId: attackerId, targetId: "hero-1" });
+      expect(r.ok).toBe(false);
+      expect((r as { error: string }).error).toContain("Taunt");
+      r = applyAction(s, 0, { type: "attack", attackerInstanceId: attackerId, targetId: tauntId });
+      expect(r.ok).toBe(true);
+    });
+
     it("creature vs creature: both take damage; attacker marked attackedThisTurn", () => {
       let s = createInitialState();
       const p0Murloc = s.players[0].hand.find((c) => c.cardId === "murloc")!;

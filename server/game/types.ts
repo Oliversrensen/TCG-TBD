@@ -7,6 +7,8 @@ export interface CardTemplate {
   attack?: number;
   health?: number;
   spellPower?: number;
+  /** Optional keywords (e.g. "Taunt") that affect game rules. */
+  keywords?: string[];
 }
 
 /** Card instance in hand or on board */
