@@ -20,6 +20,7 @@ import {
 
 const HERO_HEALTH = 50;
 const MANA_PER_TURN = 10;
+export const MAX_BOARD_SIZE = 7;
 
 let persistentEffectIdCounter = 0;
 
@@ -171,7 +172,7 @@ export type ApplyResult = { ok: true; state: GameState } | { ok: false; error: s
 function handlePlayCreature(
   next: GameState,
   playerIndex: 0 | 1,
-  action: { type: "play_creature"; cardInstanceId: string }
+  action: { type: "play_creature"; cardInstanceId: string; boardIndex?: number }
 ): ApplyResult {
   const resolved = getInstanceInState(next, playerIndex, action.cardInstanceId, "hand");
   if (!resolved)
@@ -181,6 +182,9 @@ function handlePlayCreature(
     return { ok: false, error: "Not a creature" };
   if (next.manaRemaining < template.cost)
     return { ok: false, error: "Not enough mana" };
+  const board = next.players[playerIndex].board;
+  if (board.length >= MAX_BOARD_SIZE)
+    return { ok: false, error: "Board is full" };
   const handIdx = next.players[playerIndex].hand.findIndex((c) => c.instanceId === action.cardInstanceId);
   next.players[playerIndex].hand.splice(handIdx, 1);
   const placed: CardInstance = {
@@ -189,7 +193,9 @@ function handlePlayCreature(
     currentHealth: template.health,
     attackedThisTurn: false,
   };
-  next.players[playerIndex].board.push(placed);
+  const idx = action.boardIndex ?? board.length;
+  const clampedIdx = Math.min(Math.max(0, idx), board.length);
+  board.splice(clampedIdx, 0, placed);
   runCreatureTriggers(next, playerIndex, placed, "on_summon");
   next.manaRemaining -= template.cost;
   next.lastAction = `${playerIndex} played ${template.name}`;
@@ -249,6 +255,8 @@ function handlePlaySpell(
   }
 
   if (template.spellEffect === "summon_random") {
+    if (player.board.length >= MAX_BOARD_SIZE)
+      return { ok: false, error: "Board is full" };
     const creatures = CARD_TEMPLATES.filter((c) => c.type === "creature");
     const pool = template.spellSummonPool?.length
       ? template.spellSummonPool

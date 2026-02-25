@@ -100,7 +100,7 @@ export interface GameState {
 
 /** Client → Server intents */
 export type ClientIntent =
-  | { type: "play_creature"; cardInstanceId: string }
+  | { type: "play_creature"; cardInstanceId: string; boardIndex?: number }
   | { type: "play_spell"; cardInstanceId: string; targetId?: string }
   | { type: "attack"; attackerInstanceId: string; targetId: string }
   | { type: "end_turn" };

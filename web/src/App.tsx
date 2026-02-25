@@ -1,11 +1,24 @@
-import { useState } from "react";
+import { useState, useCallback, type ReactNode } from "react";
+import { motion } from "framer-motion";
+import {
+  DndContext,
+  DragOverlay,
+  useDraggable,
+  useDroppable,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type DragStartEvent,
+} from "@dnd-kit/core";
 import { useGame } from "./useGame";
+import { GameScene3D } from "./GameScene3D";
 import { getCardTemplate } from "./cardData";
 import { cardName } from "./cardNames";
 import { authClient, getNeonAuthToken } from "./auth";
 import type { CardInstance } from "./types";
 
-const CARD_WIDTH = 90;
+const CARD_WIDTH = 100;
 const CARD_HEIGHT = Math.round(CARD_WIDTH * (3.5 / 2.5));
 
 export interface TargetOption {
@@ -27,12 +40,12 @@ function buildAttackTargets(
 const cardShape = {
   width: CARD_WIDTH,
   height: CARD_HEIGHT,
-  borderRadius: 8,
-  padding: 6,
+  borderRadius: 10,
+  padding: 8,
   boxSizing: "border-box" as const,
   display: "flex",
   flexDirection: "column" as const,
-  border: "1px solid #444",
+  border: "2px solid rgba(212,175,55,0.4)",
 };
 
 function HeroBlock({
@@ -51,27 +64,32 @@ function HeroBlock({
   onTarget?: (id: string) => void;
 }) {
   const clickable = isTarget && onTarget && targetId;
-  const borderColor = targetKind === "spell" ? "#4fc3f7" : targetKind === "attack" ? "#ff9800" : "#333";
+  const borderColor = targetKind === "spell" ? "#4fc3f7" : targetKind === "attack" ? "#ff9800" : "rgba(255,255,255,0.15)";
   return (
-    <div
+    <motion.div
       role={clickable ? "button" : undefined}
       tabIndex={clickable ? 0 : undefined}
       onClick={clickable ? () => onTarget!(targetId!) : undefined}
       onKeyDown={clickable ? (e) => e.key === "Enter" && onTarget?.(targetId!) : undefined}
+      className={`tcg-hero ${clickable ? "tcg-hero-targetable" : ""}`}
+      whileHover={clickable ? { scale: 1.02, y: -2 } : {}}
       style={{
-        padding: "12px 20px",
-        background: isTarget ? "#2a3f5f" : "#1a1a2e",
-        borderRadius: 12,
-        border: isTarget ? `2px solid ${borderColor}` : "1px solid #333",
+        padding: "14px 24px",
+        background: isTarget
+          ? "linear-gradient(180deg, rgba(79,195,247,0.2) 0%, rgba(79,195,247,0.05) 100%)"
+          : "linear-gradient(180deg, rgba(26,35,50,0.9) 0%, rgba(15,20,30,0.95) 100%)",
+        borderRadius: 14,
+        border: isTarget ? `2px solid ${borderColor}` : "1px solid rgba(255,255,255,0.1)",
         cursor: clickable ? "pointer" : "default",
-        minWidth: 120,
+        minWidth: 130,
         textAlign: "center",
+        boxShadow: isTarget ? "0 0 24px rgba(79,195,247,0.3)" : "0 4px 16px rgba(0,0,0,0.3)",
       }}
     >
       <div style={{ fontSize: 12, color: "#aaa" }}>{label}</div>
-      <div style={{ fontSize: 22 }}>❤️ {health}</div>
+      <div style={{ fontSize: 24, fontWeight: "bold" }}>❤️ {health}</div>
       {isTarget && <div style={{ fontSize: 10, color: borderColor, marginTop: 4 }}>Click to target</div>}
-    </div>
+    </motion.div>
   );
 }
 
@@ -110,6 +128,9 @@ function HandCard({
   onPlaySpellNoTarget,
   onStartSpellTarget,
   isSpellTargetMode,
+  index,
+  totalCards,
+  dragProps,
 }: {
   card: CardInstance;
   template: ReturnType<typeof getCardTemplate>;
@@ -119,6 +140,9 @@ function HandCard({
   onPlaySpellNoTarget: (cardInstanceId: string) => void;
   onStartSpellTarget: (cardInstanceId: string) => void;
   isSpellTargetMode: boolean;
+  index?: number;
+  totalCards?: number;
+  dragProps?: { attributes: object; listeners: object | undefined; setNodeRef: (el: HTMLElement | null) => void; isDragging: boolean };
 }) {
   if (!template) return null;
   const canAfford = canPlay && manaRemaining >= template.cost;
@@ -126,58 +150,134 @@ function HandCard({
   const isSpell = template.type === "spell";
   const spellNeedsTarget = isSpell && spellRequiresTarget(template);
   const isThisSpellSelected = isSpellTargetMode;
+  const playableNoTarget = canAfford && (isCreature || (isSpell && !spellNeedsTarget));
+  const fanOffset = index != null && totalCards != null && totalCards > 1
+    ? ((index / (totalCards - 1 || 1)) - 0.5) * 12
+    : 0;
 
-  return (
-    <div
+  const cardEl = (
+    <motion.div
+      ref={dragProps?.setNodeRef}
+      {...(dragProps?.attributes)}
+      {...(dragProps?.listeners)}
+      layout
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      className={`tcg-card-3d ${playableNoTarget ? "tcg-card-playable" : ""}`}
       style={{
         ...cardShape,
-        background: canAfford ? "linear-gradient(145deg, #1e3a5f 0%, #16213e 100%)" : "#0d1117",
-        opacity: canAfford ? 1 : 0.85,
-        border: isThisSpellSelected ? "2px solid #4fc3f7" : undefined,
+        background: template.type === "creature" ? "var(--card-creature)" : "var(--card-spell)",
+        opacity: canAfford ? (dragProps?.isDragging ? 0.9 : 1) : 0.75,
+        border: isThisSpellSelected ? "2px solid #4fc3f7" : "2px solid rgba(212,175,55,0.5)",
+        boxShadow: dragProps?.isDragging ? "var(--card-shadow-drag)" : "var(--card-shadow)",
+        transform: `rotate(${fanOffset}deg)`,
+        zIndex: dragProps?.isDragging ? 1000 : undefined,
       }}
     >
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-        <span
-          style={{
-            width: 22,
-            height: 22,
-            borderRadius: "50%",
-            background: "#0f3460",
-            color: "#fff",
-            fontSize: 12,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            fontWeight: "bold",
-          }}
-        >
-          {template.cost}
-        </span>
+      <div className="tcg-card-face" style={{ flex: 1, display: "flex", flexDirection: "column", padding: 8 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+          <span
+            style={{
+              width: 26,
+              height: 26,
+              borderRadius: "50%",
+              background: "linear-gradient(180deg, #2d5a8a 0%, #1a3a5a 100%)",
+              color: "#fff",
+              fontSize: 13,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontWeight: "bold",
+              boxShadow: "inset 0 1px 0 rgba(255,255,255,0.2)",
+            }}
+          >
+            {template.cost}
+          </span>
+        </div>
+        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, textAlign: "center", lineHeight: 1.2 }}>
+          {template.name}
+        </div>
+        <div style={{ fontSize: 10, color: "rgba(255,255,255,0.8)", textAlign: "center" }}>
+          {isCreature && `${template.attack}/${template.health}`}
+          {isSpell && spellDescription(template)}
+        </div>
+        <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 4 }}>
+          {canAfford && isCreature && (
+            <button type="button" onClick={(e) => { e.stopPropagation(); onPlayCreature(card.instanceId); }} style={{ width: "100%", padding: "4px 0", fontSize: 10, cursor: "pointer" }}>
+              Play
+            </button>
+          )}
+          {canAfford && isSpell && spellNeedsTarget && (
+            <button type="button" onClick={(e) => { e.stopPropagation(); onStartSpellTarget(card.instanceId); }} style={{ width: "100%", padding: "4px 0", fontSize: 10, cursor: "pointer" }}>
+              {isThisSpellSelected ? "Click a target above" : "Choose target"}
+            </button>
+          )}
+          {canAfford && isSpell && !spellNeedsTarget && (
+            <button type="button" onClick={(e) => { e.stopPropagation(); onPlaySpellNoTarget(card.instanceId); }} style={{ width: "100%", padding: "4px 0", fontSize: 10, cursor: "pointer" }}>
+              Play
+            </button>
+          )}
+        </div>
       </div>
-      <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, textAlign: "center", lineHeight: 1.2 }}>
-        {template.name}
-      </div>
-      <div style={{ fontSize: 10, color: "#aaa", textAlign: "center" }}>
-        {isCreature && `${template.attack}/${template.health}`}
-        {isSpell && spellDescription(template)}
-      </div>
-      <div style={{ marginTop: 4 }}>
-        {canAfford && isCreature && (
-          <button type="button" onClick={() => onPlayCreature(card.instanceId)} style={{ width: "100%", padding: "4px 0", fontSize: 10, cursor: "pointer" }}>
-            Play
-          </button>
-        )}
-        {canAfford && isSpell && spellNeedsTarget && (
-          <button type="button" onClick={() => onStartSpellTarget(card.instanceId)} style={{ width: "100%", padding: "4px 0", fontSize: 10, cursor: "pointer" }}>
-            {isThisSpellSelected ? "Click a target above" : "Choose target"}
-          </button>
-        )}
-        {canAfford && isSpell && !spellNeedsTarget && (
-          <button type="button" onClick={() => onPlaySpellNoTarget(card.instanceId)} style={{ width: "100%", padding: "4px 0", fontSize: 10, cursor: "pointer" }}>
-            Play
-          </button>
-        )}
-      </div>
+    </motion.div>
+  );
+  return cardEl;
+}
+
+const MAX_BOARD_SLOTS = 7;
+
+function slotId(index: number) {
+  return `board-slot-${index}`;
+}
+
+function parseSlotId(id: string): number | null {
+  const m = String(id).match(/^board-slot-(\d+)$/);
+  return m ? parseInt(m[1], 10) : null;
+}
+
+function DraggableHandCard(props: Parameters<typeof HandCard>[0] & { canDrag: boolean }) {
+  const { canDrag, card, ...rest } = props;
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+    id: card.instanceId,
+    data: { card, instanceId: card.instanceId },
+    disabled: !canDrag,
+  });
+  return (
+    <HandCard
+      {...rest}
+      card={card}
+      dragProps={canDrag ? { attributes, listeners, setNodeRef, isDragging } : undefined}
+      index={props.index}
+      totalCards={props.totalCards}
+    />
+  );
+}
+
+function DroppableSlot({
+  slotIndex,
+  children,
+  isEmpty,
+}: {
+  slotIndex: number;
+  children: ReactNode;
+  isEmpty: boolean;
+}) {
+  const { setNodeRef, isOver } = useDroppable({ id: slotId(slotIndex) });
+  return (
+    <div
+      ref={setNodeRef}
+      className={`tcg-drop-zone tcg-drop-slot ${isOver ? "tcg-drop-active" : ""}`}
+      style={{
+        minWidth: 90,
+        minHeight: 120,
+        borderRadius: 8,
+        padding: 4,
+        transition: "all 0.2s ease",
+        background: isEmpty && isOver ? "rgba(76, 175, 80, 0.25)" : isEmpty ? "rgba(0,0,0,0.2)" : "transparent",
+        border: isOver ? "2px dashed rgba(76, 175, 80, 0.8)" : "1px dashed rgba(255,255,255,0.15)",
+      }}
+    >
+      {children}
     </div>
   );
 }
@@ -208,16 +308,21 @@ function MyBoardCreature({
   const atkDisplay = String(atk);
   const clickableAsSpellTarget = isSpellTarget && onSpellTarget;
   return (
-    <div
+    <motion.div
+      layout
+      initial={{ scale: 0.8, opacity: 0 }}
+      animate={{ scale: 1, opacity: 1 }}
+      className="tcg-card-3d"
       role={clickableAsSpellTarget ? "button" : undefined}
       tabIndex={clickableAsSpellTarget ? 0 : undefined}
       onClick={clickableAsSpellTarget ? () => onSpellTarget?.(card.instanceId) : undefined}
       onKeyDown={clickableAsSpellTarget ? (e) => e.key === "Enter" && onSpellTarget?.(card.instanceId) : undefined}
       style={{
         ...cardShape,
-        background: isSelectedAttacker ? "linear-gradient(145deg, #2d4a3e 0%, #1e3a2f 100%)" : "linear-gradient(145deg, #1e3a5f 0%, #16213e 100%)",
-        border: isSelectedAttacker ? "2px solid #4caf50" : isSpellTarget ? "2px solid #4fc3f7" : "1px solid #444",
+        background: isSelectedAttacker ? "linear-gradient(165deg, #2d5a4a 0%, #1e4a3a 100%)" : "var(--card-creature)",
+        border: isSelectedAttacker ? "2px solid #4caf50" : isSpellTarget ? "2px solid #4fc3f7" : "2px solid rgba(212,175,55,0.4)",
         cursor: clickableAsSpellTarget ? "pointer" : "default",
+        boxShadow: isSelectedAttacker ? "var(--glow-green)" : "var(--card-shadow)",
       }}
     >
       <div style={{ fontSize: 10, color: "#888" }}>{template.cost}</div>
@@ -236,7 +341,7 @@ function MyBoardCreature({
           {isSelectedAttacker ? "Click enemy above" : "Attack"}
         </button>
       )}
-    </div>
+    </motion.div>
   );
 }
 
@@ -259,19 +364,22 @@ function OpponentCreatureAsTarget({
   const atk = effectiveAttack(template, card);
   const atkDisplay = String(atk);
   const clickable = (isAttackTarget || isSpellTarget) && onTarget;
-  const borderColor = isSpellTarget ? "#4fc3f7" : isAttackTarget ? "#ff9800" : "#444";
+  const borderColor = isSpellTarget ? "#4fc3f7" : isAttackTarget ? "#ff9800" : "rgba(212,175,55,0.4)";
   const hint = isSpellTarget ? "Click to target" : isAttackTarget ? "Click to attack" : null;
   return (
-    <div
+    <motion.div
+      layout
+      className="tcg-card-3d"
       role={clickable ? "button" : undefined}
       tabIndex={clickable ? 0 : undefined}
       onClick={clickable ? () => onTarget?.(card.instanceId) : undefined}
       onKeyDown={clickable ? (e) => e.key === "Enter" && onTarget?.(card.instanceId) : undefined}
       style={{
         ...cardShape,
-        background: "linear-gradient(145deg, #1e3a5f 0%, #16213e 100%)",
-        border: clickable ? `2px solid ${borderColor}` : "1px solid #444",
+        background: "var(--card-creature)",
+        border: clickable ? `2px solid ${borderColor}` : "2px solid rgba(212,175,55,0.4)",
         cursor: clickable ? "pointer" : "default",
+        boxShadow: clickable ? (isSpellTarget ? "var(--glow-blue)" : "var(--glow-orange)") : "var(--card-shadow)",
       }}
     >
       <div style={{ fontSize: 10, color: "#888" }}>{template.cost}</div>
@@ -284,16 +392,16 @@ function OpponentCreatureAsTarget({
         <span>❤️ {maxHp > (template.health ?? 0) ? `${health}/${maxHp}` : health}</span>
       </div>
       {hint && <div style={{ fontSize: 9, color: borderColor }}>{hint}</div>}
-    </div>
+    </motion.div>
   );
 }
 
 function MatchmakingScreen({
   connected,
-  wsUrl,
+  wsUrl: _wsUrl,
   matchmakingStatus,
   lobbyCode,
-  matchmakingMessage,
+  matchmakingMessage: _matchmakingMessage,
   error,
   sendMatchmaking,
   authUser,
@@ -525,8 +633,8 @@ export default function App() {
   const oppPlayer = state?.players[oppIndex];
   const isMyTurn = state?.currentTurn === myIndex && state?.winner === null;
 
-  const handlePlayCreature = (cardInstanceId: string) => {
-    sendGame({ type: "play_creature", cardInstanceId });
+  const handlePlayCreature = (cardInstanceId: string, boardIndex?: number) => {
+    sendGame({ type: "play_creature", cardInstanceId, boardIndex });
   };
   const handlePlaySpell = (cardInstanceId: string, targetId: string) => {
     sendGame({ type: "play_spell", cardInstanceId, targetId });
@@ -579,6 +687,43 @@ export default function App() {
 
   const [attackModeAttacker, setAttackModeAttacker] = useState<string | null>(null);
   const [spellTargetCardInstanceId, setSpellTargetCardInstanceId] = useState<string | null>(null);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
+  );
+
+  const [activeCard, setActiveCard] = useState<{ card: CardInstance; template: ReturnType<typeof getCardTemplate> } | null>(null);
+
+  const handleDragStart = useCallback((event: DragStartEvent) => {
+    const instanceId = event.active.id as string;
+    const card = state?.players[playerIndex ?? 0]?.hand.find((c) => c.instanceId === instanceId);
+    if (card) {
+      const template = getCardTemplate(card.cardId);
+      if (template) setActiveCard({ card, template });
+    }
+  }, [state?.players, playerIndex]);
+
+  const handleDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      const { active, over } = event;
+      setActiveCard(null);
+      if (!over || typeof over.id !== "string") return;
+      const slotIndex = parseSlotId(over.id);
+      const instanceId = active.id as string;
+      const card = state?.players[playerIndex ?? 0]?.hand.find((c) => c.instanceId === instanceId);
+      if (!card) return;
+      const template = getCardTemplate(card.cardId);
+      if (!template) return;
+      const canAfford = state && state.winner === null && (state.currentTurn === playerIndex) && state.manaRemaining >= template.cost;
+      if (!canAfford) return;
+      if (template.type === "creature" && slotIndex != null && slotIndex >= 0 && slotIndex < MAX_BOARD_SLOTS) {
+        sendGame({ type: "play_creature", cardInstanceId: instanceId, boardIndex: slotIndex });
+      } else if (template.type === "spell" && !spellRequiresTarget(template)) {
+        sendGame({ type: "play_spell", cardInstanceId: instanceId });
+      }
+    },
+    [state, playerIndex, sendGame]
+  );
 
   const boardIds = {
     mine: myPlayer?.board.map((c) => c.instanceId) ?? [],
@@ -661,22 +806,32 @@ export default function App() {
   };
 
   return (
-    <div style={{ padding: 24, maxWidth: 960, margin: "0 auto", fontFamily: "system-ui" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 12 }}>
-        <h1 style={{ margin: 0 }}>TCG</h1>
+    <div className="tcg-perspective" style={{ position: "relative", minHeight: "100vh" }}>
+      <GameScene3D />
+      <div style={{ position: "relative", zIndex: 10 }}>
+      <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd} onDragCancel={() => setActiveCard(null)}>
+    <div className="tcg-board-3d">
+      <div className="tcg-board-surface">
+    <div style={{ padding: "0 16px", fontFamily: "system-ui" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20, flexWrap: "wrap", gap: 12 }}>
+        <h1 style={{ margin: 0, fontSize: 28, background: "linear-gradient(180deg, #d4af37 0%, #8b6914 100%)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text" }}>TCG</h1>
         <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
-          <div style={{ padding: "8px 12px", background: "#1a1a2e", borderRadius: 8 }}>
-            <span style={{ fontSize: 12, color: "#aaa" }}>Mana </span>
-            <span style={{ fontSize: 20, fontWeight: "bold" }}>{state.manaRemaining} / 10</span>
+          <div style={{ padding: "10px 16px", background: "linear-gradient(180deg, rgba(26,35,50,0.95) 0%, rgba(15,20,30,0.98) 100%)", borderRadius: 12, border: "1px solid rgba(212,175,55,0.3)", boxShadow: "0 4px 12px rgba(0,0,0,0.3)" }}>
+            <span style={{ fontSize: 12, color: "rgba(255,255,255,0.7)" }}>Mana </span>
+            <span style={{ fontSize: 22, fontWeight: "bold", color: "#64b5f6" }}>{state.manaRemaining} / 10</span>
           </div>
-          <div style={{ padding: "8px 12px", background: "#1a1a2e", borderRadius: 8 }}>
-            <span style={{ fontSize: 12, color: "#aaa" }}>Turn </span>
-            <span style={{ fontSize: 18 }}>{state.currentTurn === myIndex ? "You" : (opponentUsername ?? "Opponent")}</span>
+          <div style={{ padding: "10px 16px", background: "linear-gradient(180deg, rgba(26,35,50,0.95) 0%, rgba(15,20,30,0.98) 100%)", borderRadius: 12, border: "1px solid rgba(212,175,55,0.3)", boxShadow: "0 4px 12px rgba(0,0,0,0.3)" }}>
+            <span style={{ fontSize: 12, color: "rgba(255,255,255,0.7)" }}>Turn </span>
+            <span style={{ fontSize: 18, fontWeight: "600" }}>{state.currentTurn === myIndex ? "You" : (opponentUsername ?? "Opponent")}</span>
           </div>
           {state.winner !== null && (
-            <div style={{ padding: "8px 16px", background: "#2d4a3e", borderRadius: 8, color: "#4caf50", fontSize: 18 }}>
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              style={{ padding: "12px 20px", background: "linear-gradient(180deg, #2d5a4a 0%, #1e4a3a 100%)", borderRadius: 12, color: "#4caf50", fontSize: 20, fontWeight: "bold", boxShadow: "var(--glow-green)" }}
+            >
               {state.winner === myIndex ? "You win!" : "You lose!"}
-            </div>
+            </motion.div>
           )}
         </div>
       </div>
@@ -694,7 +849,7 @@ export default function App() {
       {error && <p style={{ color: "#e74c3c", marginBottom: 8 }}>{error}</p>}
 
       {/* Opponent side (top) */}
-      <div style={{ background: "rgba(0,0,0,0.2)", borderRadius: 12, padding: 16, marginBottom: 16 }}>
+      <div style={{ background: "rgba(0,0,0,0.25)", borderRadius: 16, padding: 20, marginBottom: 20 }}>
         {spellTargetCardInstanceId && (
           <p style={{ fontSize: 12, color: "#4fc3f7", marginBottom: 8 }}>
             Choose a target for your spell (hero or minion).
@@ -728,22 +883,24 @@ export default function App() {
       </div>
 
       {/* Your side (bottom): your board, your hero, your hand */}
-      <div style={{ background: "rgba(0,0,0,0.15)", borderRadius: 12, padding: 16 }}>
-        <div style={{ fontSize: 12, color: "#aaa", marginBottom: 4 }}>Your minions</div>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", minHeight: 50, marginBottom: 16 }}>
-          {myPlayer?.board.length === 0 && <span style={{ color: "#666" }}>No minions</span>}
-          {myPlayer?.board.map((c) => (
-            <MyBoardCreature
-              key={c.instanceId}
-              card={c}
-              template={getCardTemplate(c.cardId)}
-              canAttack={isMyTurn && state.winner === null && attackTargets.length > 0}
-              attacked={c.attackedThisTurn ?? false}
-              onStartAttack={setAttackModeAttacker}
-              isSelectedAttacker={attackModeAttacker === c.instanceId}
-              isSpellTarget={!!spellTargetCardInstanceId && isSpellTargetId(c.instanceId)}
-              onSpellTarget={spellTargetCardInstanceId ? handleTargetClick : undefined}
-            />
+      <div style={{ background: "rgba(0,0,0,0.2)", borderRadius: 16, padding: 20, marginBottom: 20 }}>
+        <div style={{ fontSize: 12, color: "rgba(255,255,255,0.7)", marginBottom: 8 }}>Your minions – drag to a slot</div>
+        <div style={{ display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap", minHeight: 130, marginBottom: 16 }}>
+          {Array.from({ length: MAX_BOARD_SLOTS }, (_, i) => (
+            <DroppableSlot key={i} slotIndex={i} isEmpty={!myPlayer?.board[i]}>
+              {myPlayer?.board[i] ? (
+                <MyBoardCreature
+                  card={myPlayer.board[i]}
+                  template={getCardTemplate(myPlayer.board[i].cardId)}
+                  canAttack={isMyTurn && state.winner === null && attackTargets.length > 0}
+                  attacked={myPlayer.board[i].attackedThisTurn ?? false}
+                  onStartAttack={setAttackModeAttacker}
+                  isSelectedAttacker={attackModeAttacker === myPlayer.board[i].instanceId}
+                  isSpellTarget={!!spellTargetCardInstanceId && isSpellTargetId(myPlayer.board[i].instanceId)}
+                  onSpellTarget={spellTargetCardInstanceId ? handleTargetClick : undefined}
+                />
+              ) : null}
+            </DroppableSlot>
           ))}
         </div>
 
@@ -758,12 +915,12 @@ export default function App() {
           />
         </div>
 
-        <div style={{ fontSize: 12, color: "#aaa", marginBottom: 8 }}>
-          Your hand (deck: {myPlayer?.deck.length ?? 0})
+        <div style={{ fontSize: 12, color: "rgba(255,255,255,0.7)", marginBottom: 8 }}>
+          Your hand (deck: {myPlayer?.deck.length ?? 0}) – drag to play or click Play
         </div>
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          {myPlayer?.hand.map((c) => (
-            <HandCard
+        <div className="tcg-hand" style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
+          {myPlayer?.hand.map((c, i) => (
+            <DraggableHandCard
               key={c.instanceId}
               card={c}
               template={getCardTemplate(c.cardId)}
@@ -773,24 +930,50 @@ export default function App() {
               onPlaySpellNoTarget={handlePlaySpellNoTarget}
               onStartSpellTarget={setSpellTargetCardInstanceId}
               isSpellTargetMode={spellTargetCardInstanceId === c.instanceId}
+              canDrag={isMyTurn && state.winner === null && state.manaRemaining >= (getCardTemplate(c.cardId)?.cost ?? 999) && (getCardTemplate(c.cardId)?.type === "creature" || !spellRequiresTarget(getCardTemplate(c.cardId)!))}
+              index={i}
+              totalCards={myPlayer.hand.length}
             />
           ))}
         </div>
 
         {isMyTurn && (
-          <button
+          <motion.button
             type="button"
             onClick={handleEndTurn}
-            style={{ marginTop: 16, padding: "10px 24px", fontSize: 16, cursor: "pointer" }}
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.98 }}
+            style={{ marginTop: 16, padding: "12px 28px", fontSize: 16, cursor: "pointer", fontWeight: "600" }}
           >
             End turn
-          </button>
+          </motion.button>
         )}
       </div>
 
       {state.lastAction && (
-        <p style={{ marginTop: 12, fontSize: 12, color: "#888" }}>Last: {state.lastAction}</p>
+        <p style={{ marginTop: 12, fontSize: 12, color: "rgba(255,255,255,0.5)" }}>Last: {state.lastAction}</p>
       )}
+    </div>
+      </div>
+    </div>
+        <DragOverlay dropAnimation={null}>
+          {activeCard ? (
+            <HandCard
+              card={activeCard.card}
+              template={activeCard.template}
+              canPlay
+              manaRemaining={state?.manaRemaining ?? 0}
+              onPlayCreature={() => {}}
+              onPlaySpellNoTarget={() => {}}
+              onStartSpellTarget={() => {}}
+              isSpellTargetMode={false}
+              index={0}
+              totalCards={1}
+            />
+          ) : null}
+        </DragOverlay>
+    </DndContext>
+    </div>
     </div>
   );
 }

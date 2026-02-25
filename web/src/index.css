@@ -2,22 +2,161 @@
   box-sizing: border-box;
 }
 
+:root {
+  /* Hearthstone-inspired palette */
+  --board-felt: #1a4d2e;
+  --board-felt-dark: #0f3320;
+  --board-felt-light: #2d6a4f;
+  --board-wood: #3d2914;
+  --board-wood-dark: #2a1c0e;
+  --card-gold: linear-gradient(145deg, #d4af37 0%, #8b6914 50%, #5c4a0a 100%);
+  --card-creature: linear-gradient(165deg, #2d4a7c 0%, #1a2d4a 40%, #0d1520 100%);
+  --card-spell: linear-gradient(165deg, #4a2d7c 0%, #2a1a4a 40%, #150d20 100%);
+  --card-border: rgba(212, 175, 55, 0.5);
+  --card-border-active: rgba(255, 200, 80, 1);
+  --card-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  --card-shadow-hover: 0 16px 48px rgba(0, 0, 0, 0.6);
+  --card-shadow-drag: 0 24px 64px rgba(0, 0, 0, 0.7);
+  --glow-blue: 0 0 20px rgba(79, 195, 247, 0.5);
+  --glow-orange: 0 0 20px rgba(255, 152, 0, 0.5);
+  --glow-green: 0 0 20px rgba(76, 175, 80, 0.5);
+}
+
 body {
   margin: 0;
-  background: #0f0f1a;
-  color: #e0e0e0;
+  background: radial-gradient(ellipse at center, #0d1b2a 0%, #050a0f 100%);
+  color: #e8e6e3;
+  min-height: 100vh;
+  overflow-x: hidden;
 }
 
 button {
   cursor: pointer;
-  background: #2d3a5a;
-  color: #e0e0e0;
-  border: 1px solid #444;
-  border-radius: 4px;
-  padding: 4px 8px;
-  font-size: 12px;
+  background: linear-gradient(180deg, #3d4a6a 0%, #2d3a5a 100%);
+  color: #e8e6e3;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 13px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
 }
 
 button:hover {
-  background: #3d4a6a;
+  background: linear-gradient(180deg, #4d5a7a 0%, #3d4a6a 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+button:active {
+  transform: translateY(0);
+}
+
+/* 3D Game Board */
+.tcg-perspective {
+  perspective: 1600px;
+  min-height: 100vh;
+}
+
+.tcg-board-3d {
+  transform-style: preserve-3d;
+  transform: scale(0.98);
+  transform-origin: center center;
+  padding: 24px;
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+.tcg-board-surface {
+  background: linear-gradient(180deg, var(--board-felt-light) 0%, var(--board-felt) 30%, var(--board-felt-dark) 100%);
+  border-radius: 24px;
+  padding: 20px 24px 32px;
+  box-shadow:
+    inset 0 2px 20px rgba(255, 255, 255, 0.08),
+    inset 0 -4px 20px rgba(0, 0, 0, 0.4),
+    0 20px 60px rgba(0, 0, 0, 0.5);
+  border: 3px solid var(--board-wood);
+  position: relative;
+  transform: translateZ(0);
+}
+
+.tcg-board-surface::before {
+  content: "";
+  position: absolute;
+  inset: 4px;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  pointer-events: none;
+}
+
+/* 3D Card base */
+.tcg-card-3d {
+  transform-style: preserve-3d;
+  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1),
+    box-shadow 0.2s ease;
+  cursor: default;
+}
+
+.tcg-card-3d:hover {
+  transform: translateY(-12px) scale(1.05) rotateY(-3deg);
+  box-shadow: var(--card-shadow-hover);
+}
+
+.tcg-card-3d.tcg-card-playable:hover {
+  cursor: grab;
+}
+
+.tcg-card-3d.tcg-card-playable:active {
+  cursor: grabbing;
+}
+
+.tcg-card-face {
+  backface-visibility: hidden;
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.15),
+    0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+.tcg-card-edge {
+  position: absolute;
+  background: linear-gradient(90deg, #1a1a2e 0%, #2a2a3e 50%, #1a1a2e 100%);
+  border-radius: 2px;
+  transform-style: preserve-3d;
+}
+
+/* Hand card fan */
+.tcg-hand {
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+  gap: 4px;
+  padding: 16px 0;
+  min-height: 180px;
+}
+
+.tcg-hand .tcg-card-3d {
+  flex-shrink: 0;
+}
+
+/* Drop zone highlight */
+.tcg-drop-zone {
+  transition: box-shadow 0.2s ease, background 0.2s ease;
+}
+
+.tcg-drop-zone.tcg-drop-active {
+  box-shadow: var(--glow-green);
+  background: rgba(76, 175, 80, 0.15);
+}
+
+/* Hero block 3D */
+.tcg-hero {
+  transform-style: preserve-3d;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.tcg-hero:hover.tcg-hero-targetable {
+  transform: translateY(-4px) scale(1.02);
+  box-shadow: var(--glow-blue);
 }
