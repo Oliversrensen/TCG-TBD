@@ -14,6 +14,11 @@ describe("createInitialState", () => {
     expect(s.players[0].board).toEqual([]);
     expect(s.players[1].board).toEqual([]);
   });
+
+  it("includes empty persistentEffects array", () => {
+    const s = createInitialState();
+    expect(s.persistentEffects).toEqual([]);
+  });
 });
 
 describe("applyAction", () => {
@@ -160,6 +165,95 @@ describe("applyAction", () => {
       });
       expect(r.ok).toBe(false);
       expect((r as { error: string }).error).toContain("Invalid target");
+    });
+
+    it("rejects targeted spell without targetId", () => {
+      const s = createInitialState();
+      const spell = s.players[0].hand.find((c) => c.cardId === "fireball")!;
+      const r = applyAction(s, 0, {
+        type: "play_spell",
+        cardInstanceId: spell.instanceId,
+      });
+      expect(r.ok).toBe(false);
+      expect((r as { error: string }).error).toContain("target");
+    });
+
+    it("arcane intellect: draws 2 cards without target", () => {
+      const s = createInitialState();
+      s.players[0].hand.push({ instanceId: "p0-ai", cardId: "arcane_intellect" });
+      const handSizeBefore = s.players[0].hand.length;
+      const deckSizeBefore = s.players[0].deck.length;
+      const r = applyAction(s, 0, {
+        type: "play_spell",
+        cardInstanceId: "p0-ai",
+      });
+      expect(r.ok).toBe(true);
+      if (!r.ok) return;
+      expect(r.state.players[0].hand.length).toBe(handSizeBefore - 1 + 2); // -1 spell +2 drawn
+      expect(r.state.players[0].deck.length).toBe(Math.max(0, deckSizeBefore - 2));
+    });
+
+    it("animal companion: summons random minion without target", () => {
+      const s = createInitialState();
+      s.players[0].hand.push({ instanceId: "p0-ac", cardId: "animal_companion" });
+      const r = applyAction(s, 0, {
+        type: "play_spell",
+        cardInstanceId: "p0-ac",
+      });
+      expect(r.ok).toBe(true);
+      if (!r.ok) return;
+      expect(r.state.players[0].board.length).toBe(1);
+      const summoned = r.state.players[0].board[0];
+      expect(["murloc", "shieldbearer", "ogre"]).toContain(summoned.cardId);
+    });
+
+    it("curse of agony: creates persistent effect", () => {
+      const s = createInitialState();
+      s.players[0].hand.push({ instanceId: "p0-curse", cardId: "curse_of_agony" });
+      const r = applyAction(s, 0, {
+        type: "play_spell",
+        cardInstanceId: "p0-curse",
+      });
+      expect(r.ok).toBe(true);
+      if (!r.ok) return;
+      expect(r.state.persistentEffects?.length).toBe(1);
+      expect(r.state.persistentEffects![0].ownerIndex).toBe(0);
+      expect(r.state.persistentEffects![0].turnsRemaining).toBe(3);
+      expect(r.state.persistentEffects![0].triggerPhase).toBe("start_of_turn");
+    });
+
+    it("persistent effect: deal damage to enemy minions at start of turn", () => {
+      let s = createInitialState();
+      s.players[0].hand.push({ instanceId: "p0-curse", cardId: "curse_of_agony" });
+      s.players[0].hand.push({ instanceId: "p0-mur", cardId: "murloc" });
+      let r = applyAction(s, 0, { type: "play_spell", cardInstanceId: "p0-curse" });
+      if (!r.ok) return;
+      s = r.state;
+      r = applyAction(s, 0, { type: "play_creature", cardInstanceId: "p0-mur" });
+      if (!r.ok) return;
+      s = r.state;
+      r = applyAction(s, 0, { type: "end_turn" });
+      if (!r.ok) return;
+      s = r.state;
+      const p1Murloc = s.players[1].hand.find((c) => c.cardId === "murloc")!;
+      r = applyAction(s, 1, { type: "play_creature", cardInstanceId: p1Murloc.instanceId });
+      if (!r.ok) return;
+      s = r.state;
+      r = applyAction(s, 1, {
+        type: "attack",
+        attackerInstanceId: s.players[1].board[0].instanceId,
+        targetId: s.players[0].board[0].instanceId,
+      });
+      if (!r.ok) return;
+      s = r.state;
+      expect(s.players[1].board[0].currentHealth).toBe(1);
+      r = applyAction(s, 1, { type: "end_turn" });
+      if (!r.ok) return;
+      s = r.state;
+      expect(s.currentTurn).toBe(0);
+      expect(s.players[1].board.length).toBe(0);
+      expect(s.persistentEffects!.length).toBe(1);
+      expect(s.persistentEffects![0].turnsRemaining).toBe(2);
     });
 
     it("deals damage to enemy creature and removes it when health <= 0", () => {
@@ -360,6 +454,54 @@ describe("applyAction", () => {
       expect(r.state.players[1].board.length).toBe(0);
       expect(r.state.players[0].board.length).toBe(1);
       expect(r.state.players[0].board[0].currentHealth).toBe(3);
+    });
+
+    it("Berserker: gains attack when damaged (on_damage trigger)", () => {
+      let s = createInitialState();
+      s.players[0].hand.push({ instanceId: "p0-ber", cardId: "berserker" });
+      s.players[1].hand.push({ instanceId: "p1-mur", cardId: "murloc" });
+      let r = applyAction(s, 0, { type: "play_creature", cardInstanceId: "p0-ber" });
+      if (!r.ok) return;
+      s = r.state;
+      expect(s.players[0].board[0].attackBuff).toBeUndefined();
+      r = applyAction(s, 0, { type: "end_turn" });
+      if (!r.ok) return;
+      s = r.state;
+      r = applyAction(s, 1, { type: "play_creature", cardInstanceId: "p1-mur" });
+      if (!r.ok) return;
+      s = r.state;
+      r = applyAction(s, 1, {
+        type: "attack",
+        attackerInstanceId: s.players[1].board[0].instanceId,
+        targetId: s.players[0].board[0].instanceId,
+      });
+      expect(r.ok).toBe(true);
+      if (!r.ok) return;
+      expect(r.state.players[0].board[0].attackBuff).toBe(2);
+      expect(r.state.players[0].board[0].currentHealth).toBe(2);
+    });
+
+    it("Berserker: gains attack when hit in combat, uses buffed attack for counter-damage", () => {
+      let s = createInitialState();
+      s.players[0].hand.push({ instanceId: "p0-ber", cardId: "berserker" });
+      s.players[1].hand.push({ instanceId: "p1-mur", cardId: "murloc" });
+      let r = applyAction(s, 0, { type: "play_creature", cardInstanceId: "p0-ber" });
+      if (!r.ok) return;
+      s = r.state;
+      r = applyAction(s, 0, { type: "end_turn" });
+      if (!r.ok) return;
+      s = r.state;
+      r = applyAction(s, 1, { type: "play_creature", cardInstanceId: "p1-mur" });
+      if (!r.ok) return;
+      s = r.state;
+      const berserkerId = s.players[0].board[0].instanceId;
+      const murlocId = s.players[1].board[0].instanceId;
+      r = applyAction(s, 1, { type: "attack", attackerInstanceId: murlocId, targetId: berserkerId });
+      expect(r.ok).toBe(true);
+      if (!r.ok) return;
+      expect(r.state.players[0].board[0].attackBuff).toBe(2);
+      expect(r.state.players[0].board[0].currentHealth).toBe(2);
+      expect(r.state.players[1].board.length).toBe(0);
     });
 
     it("creature vs creature: attacker dies from counter damage", () => {

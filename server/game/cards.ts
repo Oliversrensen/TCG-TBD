@@ -34,6 +34,16 @@ export const CARD_TEMPLATES: CardTemplate[] = [
     health: 4,
   },
   {
+    id: "berserker",
+    name: "Berserker",
+    type: "creature",
+    cost: 3,
+    attack: 2,
+    health: 3,
+    triggers: [{ event: "on_damage", effect: { type: "gain_attack", value: 2 } }],
+    flavorText: "Anger is a gift.",
+  },
+  {
     id: "dragon",
     name: "Dragon",
     type: "creature",
@@ -47,6 +57,8 @@ export const CARD_TEMPLATES: CardTemplate[] = [
     type: "spell",
     cost: 4,
     spellPower: 6,
+    spellEffect: "damage",
+    flavorText: "Fire! Fire! Fire!",
   },
   {
     id: "frostbolt",
@@ -54,6 +66,42 @@ export const CARD_TEMPLATES: CardTemplate[] = [
     type: "spell",
     cost: 2,
     spellPower: 3,
+    spellEffect: "damage",
+    flavorText: "Cool as ice.",
+  },
+  {
+    id: "arcane_intellect",
+    name: "Arcane Intellect",
+    type: "spell",
+    cost: 3,
+    spellEffect: "draw",
+    spellDraw: 2,
+    requiresTarget: false,
+    flavorText: "Knowledge is power.",
+  },
+  {
+    id: "animal_companion",
+    name: "Animal Companion",
+    type: "spell",
+    cost: 3,
+    spellEffect: "summon_random",
+    requiresTarget: false,
+    spellSummonPool: ["murloc", "shieldbearer", "ogre"],
+    flavorText: "Who's a good boy?",
+  },
+  {
+    id: "curse_of_agony",
+    name: "Curse of Agony",
+    type: "spell",
+    cost: 2,
+    spellEffect: "create_persistent",
+    requiresTarget: false,
+    spellPersistent: {
+      triggerPhase: "start_of_turn",
+      duration: 3,
+      effect: { type: "deal_damage_all_enemy_minions", damage: 1 },
+    },
+    flavorText: "Slow and painful.",
   },
 ];
 
@@ -77,6 +125,10 @@ export const DEFAULT_DECK: { cardId: string; count: number }[] = [
   { cardId: "dragon", count: 1 },
   { cardId: "shieldbearer", count: 2 },
   { cardId: "murloc", count: 2 },
+  { cardId: "berserker", count: 1 },
+  { cardId: "curse_of_agony", count: 1 },
+  { cardId: "arcane_intellect", count: 1 },
+  { cardId: "animal_companion", count: 1 },
   { cardId: "frostbolt", count: 1 },
   { cardId: "ogre", count: 1 },
   { cardId: "fireball", count: 1 },
@@ -99,6 +151,16 @@ const DECK_CARD_IDS = expandDeckList();
 let instanceCounter = 0;
 function nextInstanceId(prefix: string): string {
   return `${prefix}-${++instanceCounter}`;
+}
+
+/** Create a new card instance (e.g. for summon effects). */
+export function createCardInstance(cardId: string, playerPrefix: "p0" | "p1"): CardInstance {
+  const template = getCardTemplate(cardId);
+  return {
+    instanceId: nextInstanceId(playerPrefix),
+    cardId,
+    ...(template?.type === "creature" ? { currentHealth: template.health, attackedThisTurn: false } : {}),
+  };
 }
 
 /** Create a full deck for a player (unique instanceIds). Deck order is random-ish by list order. */

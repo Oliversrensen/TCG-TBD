@@ -47,6 +47,13 @@ const lines = [
   "  health?: number;",
   "  spellPower?: number;",
   "  keywords?: string[];",
+  "  flavorText?: string;",
+  "  requiresTarget?: boolean;",
+  "  spellEffect?: \"damage\" | \"draw\" | \"summon_random\" | \"create_persistent\";",
+  "  spellDraw?: number;",
+  "  spellSummonPool?: string[];",
+  "  triggers?: { event: string; effect: { type: string; value?: number } }[];",
+  "  spellPersistent?: { triggerPhase: string; duration: number; effect: Record<string, unknown> };",
   "}",
   "",
   "export const CARD_TEMPLATES: CardTemplate[] = " +

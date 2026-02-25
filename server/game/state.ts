@@ -1,14 +1,27 @@
-import type { GameState, PlayerState, CardInstance, ClientIntent } from "./types.js";
+import type {
+  GameState,
+  PlayerState,
+  CardInstance,
+  ClientIntent,
+  Trigger,
+  TriggerEvent,
+  PersistentEffect,
+  PersistentEffectPayload,
+} from "./types.js";
 import {
   createDeck,
+  createCardInstance,
   drawCards,
   getCardTemplate,
+  CARD_TEMPLATES,
   INITIAL_DRAW,
   MAX_HAND_SIZE,
 } from "./cards.js";
 
 const HERO_HEALTH = 50;
 const MANA_PER_TURN = 10;
+
+let persistentEffectIdCounter = 0;
 
 function createPlayerState(deck: CardInstance[]): PlayerState {
   const hand: CardInstance[] = [];
@@ -30,6 +43,7 @@ export function createInitialState(): GameState {
     manaRemaining: MANA_PER_TURN,
     players: [createPlayerState(deck0), createPlayerState(deck1)],
     winner: null,
+    persistentEffects: [],
   };
 }
 
@@ -85,7 +99,38 @@ function getEnemyCreaturesWithKeyword(state: GameState, enemyIndex: 0 | 1, keywo
   return set;
 }
 
-/** Apply damage to a target; update state in place (on a clone). Return true if hero died. */
+/** Run creature triggers for the given event. Mutates state. */
+function runCreatureTriggers(
+  state: GameState,
+  playerIndex: 0 | 1,
+  instance: CardInstance,
+  event: TriggerEvent
+): void {
+  const template = getCardTemplate(instance.cardId);
+  const triggers = template?.type === "creature" ? (template as { triggers?: Trigger[] }).triggers : undefined;
+  if (!triggers) return;
+  for (const t of triggers) {
+    if (t.event !== event) continue;
+    const eff = t.effect;
+    if (eff.type === "gain_attack") {
+      instance.attackBuff = (instance.attackBuff ?? 0) + eff.value;
+    } else if (eff.type === "gain_health") {
+      instance.healthBuff = (instance.healthBuff ?? 0) + eff.value;
+      instance.currentHealth = (instance.currentHealth ?? 0) + eff.value;
+    } else if (eff.type === "heal") {
+      const templ = getCardTemplate(instance.cardId);
+      const maxHp = (templ?.type === "creature" ? (templ.health ?? 0) : 0) + (instance.healthBuff ?? 0);
+      instance.currentHealth = Math.min(maxHp, (instance.currentHealth ?? 0) + eff.value);
+    }
+  }
+}
+
+/** Effective attack for a creature (base + buffs). */
+function getEffectiveAttack(template: { attack?: number }, instance: CardInstance): number {
+  return (template.attack ?? 0) + (instance.attackBuff ?? 0);
+}
+
+/** Apply damage to a target; update state in place. Runs on_damage triggers. Return true if hero died. */
 function applyDamageToTarget(
   state: GameState,
   targetId: string,
@@ -102,9 +147,9 @@ function applyDamageToTarget(
   const idx = board.findIndex((c) => c.instanceId === targetId);
   if (idx === -1) return false;
   const c = board[idx];
-  const newHealth = (c.currentHealth ?? 0) - damage;
-  if (newHealth <= 0) board.splice(idx, 1);
-  else c.currentHealth = newHealth;
+  c.currentHealth = (c.currentHealth ?? 0) - damage;
+  runCreatureTriggers(state, t.playerIndex, c, "on_damage");
+  if ((c.currentHealth ?? 0) <= 0) board.splice(idx, 1);
   return false;
 }
 
@@ -126,40 +171,105 @@ function handlePlayCreature(
     return { ok: false, error: "Not enough mana" };
   const handIdx = next.players[playerIndex].hand.findIndex((c) => c.instanceId === action.cardInstanceId);
   next.players[playerIndex].hand.splice(handIdx, 1);
-  next.players[playerIndex].board.push({
+  const placed: CardInstance = {
     instanceId: instance.instanceId,
     cardId: instance.cardId,
     currentHealth: template.health,
     attackedThisTurn: false,
-  });
+  };
+  next.players[playerIndex].board.push(placed);
+  runCreatureTriggers(next, playerIndex, placed, "on_summon");
   next.manaRemaining -= template.cost;
   next.lastAction = `${playerIndex} played ${template.name}`;
   return { ok: true, state: next };
 }
 
+/** Whether this spell needs a target (damage spells). */
+function spellRequiresTarget(template: { spellEffect?: string; requiresTarget?: boolean; spellPower?: number }): boolean {
+  if (template.requiresTarget === false) return false;
+  if (template.spellEffect === "draw" || template.spellEffect === "summon_random" || template.spellEffect === "create_persistent") return false;
+  return template.spellPower != null; // damage spell
+}
+
 function handlePlaySpell(
   next: GameState,
   playerIndex: 0 | 1,
-  action: { type: "play_spell"; cardInstanceId: string; targetId: string }
+  action: { type: "play_spell"; cardInstanceId: string; targetId?: string }
 ): ApplyResult {
   const resolved = getInstanceInState(next, playerIndex, action.cardInstanceId, "hand");
   if (!resolved)
     return { ok: false, error: "Card not in hand or unknown card" };
   const { instance, template } = resolved;
-  if (template.type !== "spell" || template.spellPower == null)
+  if (template.type !== "spell")
     return { ok: false, error: "Not a spell" };
   if (next.manaRemaining < template.cost)
     return { ok: false, error: "Not enough mana" };
-  const target = resolveTarget(next, action.targetId);
-  if (!target)
-    return { ok: false, error: "Invalid target" };
+
+  const needsTarget = spellRequiresTarget(template);
+  if (needsTarget) {
+    if (action.targetId == null)
+      return { ok: false, error: "This spell requires a target" };
+    const target = resolveTarget(next, action.targetId);
+    if (!target)
+      return { ok: false, error: "Invalid target" };
+    if (template.spellPower == null)
+      return { ok: false, error: "Not a damage spell" };
+    const handIdx = next.players[playerIndex].hand.findIndex((c) => c.instanceId === action.cardInstanceId);
+    next.players[playerIndex].hand.splice(handIdx, 1);
+    next.manaRemaining -= template.cost;
+    const heroDied = applyDamageToTarget(next, action.targetId, template.spellPower);
+    if (heroDied) next.winner = playerIndex;
+    next.lastAction = `${playerIndex} cast ${template.name} on ${action.targetId}`;
+    return { ok: true, state: next };
+  }
+
+  // Non-targetable spell: draw or summon_random
   const handIdx = next.players[playerIndex].hand.findIndex((c) => c.instanceId === action.cardInstanceId);
   next.players[playerIndex].hand.splice(handIdx, 1);
   next.manaRemaining -= template.cost;
-  const heroDied = applyDamageToTarget(next, action.targetId, template.spellPower);
-  if (heroDied) next.winner = playerIndex;
-  next.lastAction = `${playerIndex} cast ${template.name} on ${action.targetId}`;
-  return { ok: true, state: next };
+  const player = next.players[playerIndex];
+
+  if (template.spellEffect === "draw") {
+    const count = template.spellDraw ?? 2;
+    drawCards(player.hand, player.deck, count, MAX_HAND_SIZE);
+    next.lastAction = `${playerIndex} cast ${template.name} (draw ${count})`;
+    return { ok: true, state: next };
+  }
+
+  if (template.spellEffect === "summon_random") {
+    const creatures = CARD_TEMPLATES.filter((c) => c.type === "creature");
+    const pool = template.spellSummonPool?.length
+      ? template.spellSummonPool
+          .map((id) => creatures.find((c) => c.id === id))
+          .filter((c): c is NonNullable<typeof c> => c != null)
+      : creatures;
+    if (pool.length === 0)
+      return { ok: false, error: "No valid minion to summon" };
+    const chosen = pool[Math.floor(Math.random() * pool.length)];
+    const prefix = playerIndex === 0 ? "p0" : "p1";
+    const summoned = createCardInstance(chosen.id, prefix);
+    player.board.push(summoned);
+    next.lastAction = `${playerIndex} cast ${template.name} (summoned ${chosen.name})`;
+    return { ok: true, state: next };
+  }
+
+  if (template.spellEffect === "create_persistent" && template.spellPersistent) {
+    const cfg = template.spellPersistent;
+    const eff: PersistentEffect = {
+      id: `pe-${++persistentEffectIdCounter}`,
+      ownerIndex: playerIndex,
+      triggerPhase: cfg.triggerPhase,
+      turnsRemaining: cfg.duration,
+      effect: cfg.effect,
+      sourceCardName: template.name,
+    };
+    if (!next.persistentEffects) next.persistentEffects = [];
+    next.persistentEffects.push(eff);
+    next.lastAction = `${playerIndex} cast ${template.name} (${cfg.duration} turn effect)`;
+    return { ok: true, state: next };
+  }
+
+  return { ok: false, error: "Unknown spell effect" };
 }
 
 function handleAttack(
@@ -191,7 +301,8 @@ function handleAttack(
     if (!enemyTaunts.has(action.targetId))
       return { ok: false, error: "Must attack a Taunt creature first" };
   }
-  const attackDamage = template.attack;
+  runCreatureTriggers(next, playerIndex, attacker, "on_attack");
+  const attackDamage = getEffectiveAttack(template, attacker);
   if (target.kind === "hero") {
     applyDamageToTarget(next, action.targetId, attackDamage);
     if (next.players[enemyIndex].heroHealth <= 0) next.winner = playerIndex;
@@ -200,7 +311,7 @@ function handleAttack(
   } else {
     applyDamageToTarget(next, action.targetId, attackDamage);
     const targetTemplate = getCardTemplate(target.instance.cardId);
-    const counterDamage = targetTemplate?.type === "creature" ? (targetTemplate.attack ?? 0) : 0;
+    const counterDamage = targetTemplate?.type === "creature" ? getEffectiveAttack(targetTemplate, target.instance) : 0;
     applyDamageToTarget(next, action.attackerInstanceId, counterDamage);
     const stillAlive = player.board.some((c) => c.instanceId === action.attackerInstanceId);
     if (stillAlive) {
@@ -212,7 +323,55 @@ function handleAttack(
   return { ok: true, state: next };
 }
 
+/** Apply a single persistent effect. Mutates state. Returns true if hero died. */
+function applyPersistentEffect(state: GameState, effect: PersistentEffect): boolean {
+  const owner = effect.ownerIndex;
+  const enemy = (1 - owner) as 0 | 1;
+  const payload = effect.effect;
+
+  if (payload.type === "deal_damage_all_enemy_minions") {
+    for (const c of [...state.players[enemy].board]) {
+      applyDamageToTarget(state, c.instanceId, payload.damage);
+    }
+  } else if (payload.type === "deal_damage_enemy_hero") {
+    state.players[enemy].heroHealth = Math.max(0, state.players[enemy].heroHealth - payload.damage);
+    if (state.players[enemy].heroHealth === 0) {
+      state.winner = owner;
+      return true;
+    }
+  } else if (payload.type === "draw_cards") {
+    drawCards(state.players[owner].hand, state.players[owner].deck, payload.count, MAX_HAND_SIZE);
+  } else if (payload.type === "heal_hero") {
+    state.players[owner].heroHealth = Math.min(HERO_HEALTH, state.players[owner].heroHealth + payload.amount);
+  } else if (payload.type === "deal_damage_all_minions") {
+    for (const pi of [0, 1] as const) {
+      for (const c of [...state.players[pi].board]) {
+        applyDamageToTarget(state, c.instanceId, payload.damage);
+      }
+    }
+  }
+  return false;
+}
+
+/** Process persistent effects for the given player and phase. Mutates state. Returns true if game ended. */
+function processPersistentEffects(state: GameState, playerIndex: 0 | 1, phase: "start_of_turn" | "end_of_turn"): boolean {
+  const effects = state.persistentEffects ?? [];
+  for (const eff of effects) {
+    if (eff.ownerIndex !== playerIndex || eff.triggerPhase !== phase) continue;
+    if (applyPersistentEffect(state, eff)) return true;
+  }
+  const list = state.persistentEffects ?? [];
+  for (let i = list.length - 1; i >= 0; i--) {
+    const eff = list[i]!;
+    if (eff.ownerIndex !== playerIndex || eff.triggerPhase !== phase) continue;
+    eff.turnsRemaining--;
+    if (eff.turnsRemaining <= 0) list.splice(i, 1);
+  }
+  return false;
+}
+
 function handleEndTurn(next: GameState, playerIndex: 0 | 1): ApplyResult {
+  if (processPersistentEffects(next, playerIndex, "end_of_turn")) return { ok: true, state: next };
   next.currentTurn = (1 - playerIndex) as 0 | 1;
   next.manaRemaining = MANA_PER_TURN;
   for (const c of next.players[playerIndex].board) {
@@ -220,6 +379,7 @@ function handleEndTurn(next: GameState, playerIndex: 0 | 1): ApplyResult {
   }
   const nextPlayer = next.players[next.currentTurn]!;
   drawCards(nextPlayer.hand, nextPlayer.deck, 1, MAX_HAND_SIZE);
+  if (processPersistentEffects(next, next.currentTurn, "start_of_turn")) return { ok: true, state: next };
   next.lastAction = `${playerIndex} ended turn`;
   return { ok: true, state: next };
 }

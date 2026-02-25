@@ -75,12 +75,39 @@ function HeroBlock({
   );
 }
 
+function spellRequiresTarget(template: { spellEffect?: string; requiresTarget?: boolean; spellPower?: number }): boolean {
+  if (template.requiresTarget === false) return false;
+  if (template.spellEffect === "draw" || template.spellEffect === "summon_random" || template.spellEffect === "create_persistent") return false;
+  return template.spellPower != null;
+}
+
+function effectiveAttack(template: { attack?: number }, card: CardInstance): number {
+  return (template.attack ?? 0) + (card.attackBuff ?? 0);
+}
+function effectiveMaxHealth(template: { health?: number }, card: CardInstance): number {
+  return (template.health ?? 0) + (card.healthBuff ?? 0);
+}
+
+function spellDescription(template: { spellEffect?: string; spellPower?: number; spellDraw?: number; spellPersistent?: { duration: number; effect?: { type?: string; damage?: number } } }): string {
+  if (template.spellEffect === "draw") return `Draw ${template.spellDraw ?? 2}`;
+  if (template.spellEffect === "summon_random") return "Summon random minion";
+  if (template.spellEffect === "create_persistent" && template.spellPersistent) {
+    const p = template.spellPersistent;
+    const dmg = p.effect?.damage ?? 0;
+    const desc = p.effect?.type === "deal_damage_all_enemy_minions" ? `Deal ${dmg} to all enemy minions` : "Effect";
+    return `${desc} (${p.duration} turns)`;
+  }
+  if (template.spellPower != null) return `Deal ${template.spellPower} damage`;
+  return "Spell";
+}
+
 function HandCard({
   card,
   template,
   canPlay,
   manaRemaining,
   onPlayCreature,
+  onPlaySpellNoTarget,
   onStartSpellTarget,
   isSpellTargetMode,
 }: {
@@ -89,6 +116,7 @@ function HandCard({
   canPlay: boolean;
   manaRemaining: number;
   onPlayCreature: (id: string) => void;
+  onPlaySpellNoTarget: (cardInstanceId: string) => void;
   onStartSpellTarget: (cardInstanceId: string) => void;
   isSpellTargetMode: boolean;
 }) {
@@ -96,7 +124,8 @@ function HandCard({
   const canAfford = canPlay && manaRemaining >= template.cost;
   const isCreature = template.type === "creature";
   const isSpell = template.type === "spell";
-  const isThisSpellSelected = isSpellTargetMode; // we only show "Click a target above" when this card triggered spell mode; parent passes isSpellTargetMode when spellTargetCardInstanceId === card.instanceId
+  const spellNeedsTarget = isSpell && spellRequiresTarget(template);
+  const isThisSpellSelected = isSpellTargetMode;
 
   return (
     <div
@@ -130,7 +159,7 @@ function HandCard({
       </div>
       <div style={{ fontSize: 10, color: "#aaa", textAlign: "center" }}>
         {isCreature && `${template.attack}/${template.health}`}
-        {isSpell && `Spell ${template.spellPower}`}
+        {isSpell && spellDescription(template)}
       </div>
       <div style={{ marginTop: 4 }}>
         {canAfford && isCreature && (
@@ -138,9 +167,14 @@ function HandCard({
             Play
           </button>
         )}
-        {canAfford && isSpell && (
+        {canAfford && isSpell && spellNeedsTarget && (
           <button type="button" onClick={() => onStartSpellTarget(card.instanceId)} style={{ width: "100%", padding: "4px 0", fontSize: 10, cursor: "pointer" }}>
             {isThisSpellSelected ? "Click a target above" : "Choose target"}
+          </button>
+        )}
+        {canAfford && isSpell && !spellNeedsTarget && (
+          <button type="button" onClick={() => onPlaySpellNoTarget(card.instanceId)} style={{ width: "100%", padding: "4px 0", fontSize: 10, cursor: "pointer" }}>
+            Play
           </button>
         )}
       </div>
@@ -168,7 +202,10 @@ function MyBoardCreature({
   onSpellTarget?: (id: string) => void;
 }) {
   if (!template) return null;
+  const maxHp = effectiveMaxHealth(template, card);
   const health = card.currentHealth ?? template.health ?? 0;
+  const atk = effectiveAttack(template, card);
+  const atkDisplay = (card.attackBuff ?? 0) > 0 ? `${template.attack ?? 0}+${card.attackBuff}` : String(atk);
   const clickableAsSpellTarget = isSpellTarget && onSpellTarget;
   return (
     <div
@@ -189,8 +226,8 @@ function MyBoardCreature({
       </div>
       {template.keywords?.length ? <div style={{ fontSize: 9, color: "#b8a" }}>{template.keywords.join(" ")}</div> : null}
       <div style={{ display: "flex", justifyContent: "space-around", fontSize: 11 }}>
-        <span>⚔️ {template.attack}</span>
-        <span>❤️ {health}</span>
+        <span>⚔️ {atkDisplay}</span>
+        <span>❤️ {maxHp > (template.health ?? 0) ? `${health}/${maxHp}` : health}</span>
       </div>
       {attacked && <div style={{ fontSize: 9, color: "#888" }}>Attacked</div>}
       {isSpellTarget && <div style={{ fontSize: 9, color: "#4fc3f7" }}>Click to target</div>}
@@ -217,7 +254,10 @@ function OpponentCreatureAsTarget({
   onTarget?: (id: string) => void;
 }) {
   if (!template) return null;
+  const maxHp = effectiveMaxHealth(template, card);
   const health = card.currentHealth ?? template.health ?? 0;
+  const atk = effectiveAttack(template, card);
+  const atkDisplay = (card.attackBuff ?? 0) > 0 ? `${template.attack ?? 0}+${card.attackBuff}` : String(atk);
   const clickable = (isAttackTarget || isSpellTarget) && onTarget;
   const borderColor = isSpellTarget ? "#4fc3f7" : isAttackTarget ? "#ff9800" : "#444";
   const hint = isSpellTarget ? "Click to target" : isAttackTarget ? "Click to attack" : null;
@@ -240,8 +280,8 @@ function OpponentCreatureAsTarget({
       </div>
       {template.keywords?.length ? <div style={{ fontSize: 9, color: "#b8a" }}>{template.keywords.join(" ")}</div> : null}
       <div style={{ display: "flex", justifyContent: "space-around", fontSize: 11 }}>
-        <span>⚔️ {template.attack}</span>
-        <span>❤️ {health}</span>
+        <span>⚔️ {atkDisplay}</span>
+        <span>❤️ {maxHp > (template.health ?? 0) ? `${health}/${maxHp}` : health}</span>
       </div>
       {hint && <div style={{ fontSize: 9, color: borderColor }}>{hint}</div>}
     </div>
@@ -320,9 +360,6 @@ function MatchmakingScreen({
   return (
     <div style={{ padding: 24, maxWidth: 480, margin: "0 auto", fontFamily: "system-ui" }}>
       <h1>TCG – Matchmaking</h1>
-      <p style={{ fontSize: 14, color: connected ? "#2ecc71" : "#e74c3c", marginBottom: 16 }}>
-        {connected ? "● Connected to " + wsUrl : "● Disconnected"}
-      </p>
       {error && <p style={{ color: "#e74c3c", marginBottom: 8 }}>{error}</p>}
 
       <div style={{ marginBottom: 24, padding: 12, borderRadius: 8, background: "#111827" }}>
@@ -389,9 +426,7 @@ function MatchmakingScreen({
           </div>
         )}
       </div>
-      {matchmakingMessage && (
-        <p style={{ color: "#aaa", marginBottom: 16 }}>{matchmakingMessage}</p>
-      )}
+      
 
       {authUser && matchmakingStatus === "idle" && (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -496,6 +531,9 @@ export default function App() {
   const handlePlaySpell = (cardInstanceId: string, targetId: string) => {
     sendGame({ type: "play_spell", cardInstanceId, targetId });
   };
+  const handlePlaySpellNoTarget = (cardInstanceId: string) => {
+    sendGame({ type: "play_spell", cardInstanceId });
+  };
   const handleAttack = (attackerInstanceId: string, targetId: string) => {
     sendGame({ type: "attack", attackerInstanceId, targetId });
   };
@@ -578,13 +616,6 @@ export default function App() {
       <div style={{ padding: 24, maxWidth: 500 }}>
         <p style={{ color: "#e74c3c" }}>Connection failed</p>
         <p>{closeReason || error || "Unknown error."}</p>
-        <p style={{ fontSize: 12, color: "#888", marginTop: 16 }}>
-          Server: <code>{wsUrl}</code>
-          <br />
-          Make sure the server is running: <code>cd server; npm run build; npm start</code>
-          <br />
-          If you host the server elsewhere, set <code>VITE_TCG_SERVER=wss://your-server</code> and rebuild.
-        </p>
         <button
           type="button"
           onClick={reconnect}
@@ -599,10 +630,6 @@ export default function App() {
   if (status === "connecting" || !connected) {
     return (
       <div style={{ padding: 24 }}>
-        <p>Connecting to {wsUrl}…</p>
-        <p style={{ fontSize: 12, color: "#888" }}>
-          Start the server with: <code>cd server; npm run build; npm start</code>
-        </p>
       </div>
     );
   }
@@ -653,6 +680,17 @@ export default function App() {
           )}
         </div>
       </div>
+      {state.persistentEffects?.length ? (
+        <div style={{ fontSize: 12, color: "#9ca3af", marginBottom: 8 }}>
+          {state.persistentEffects
+            .filter((e) => e.ownerIndex === myIndex)
+            .map((e) => (
+              <span key={e.id} style={{ marginRight: 12 }}>
+                {e.sourceCardName ?? "Effect"}: {e.turnsRemaining} turn{e.turnsRemaining !== 1 ? "s" : ""} left
+              </span>
+            ))}
+        </div>
+      ) : null}
       {error && <p style={{ color: "#e74c3c", marginBottom: 8 }}>{error}</p>}
 
       {/* Opponent side (top) */}
@@ -732,6 +770,7 @@ export default function App() {
               canPlay={isMyTurn && state.winner === null}
               manaRemaining={state.manaRemaining}
               onPlayCreature={handlePlayCreature}
+              onPlaySpellNoTarget={handlePlaySpellNoTarget}
               onStartSpellTarget={setSpellTargetCardInstanceId}
               isSpellTargetMode={spellTargetCardInstanceId === c.instanceId}
             />

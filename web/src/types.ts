@@ -5,6 +5,17 @@ export interface CardInstance {
   cardId: string;
   currentHealth?: number;
   attackedThisTurn?: boolean;
+  attackBuff?: number;
+  healthBuff?: number;
+}
+
+export interface PersistentEffect {
+  id: string;
+  ownerIndex: 0 | 1;
+  triggerPhase: "start_of_turn" | "end_of_turn";
+  turnsRemaining: number;
+  effect: Record<string, unknown>;
+  sourceCardName?: string;
 }
 
 export interface PlayerState {
@@ -21,11 +32,12 @@ export interface GameState {
   winner: 0 | 1 | null;
   lastAction?: string;
   error?: string;
+  persistentEffects?: PersistentEffect[];
 }
 
 export type GameIntent =
   | { type: "play_creature"; cardInstanceId: string }
-  | { type: "play_spell"; cardInstanceId: string; targetId: string }
+  | { type: "play_spell"; cardInstanceId: string; targetId?: string }
   | { type: "attack"; attackerInstanceId: string; targetId: string }
   | { type: "end_turn" };
 
