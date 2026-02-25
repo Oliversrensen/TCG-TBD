@@ -205,7 +205,7 @@ function MyBoardCreature({
   const maxHp = effectiveMaxHealth(template, card);
   const health = card.currentHealth ?? template.health ?? 0;
   const atk = effectiveAttack(template, card);
-  const atkDisplay = (card.attackBuff ?? 0) > 0 ? `${template.attack ?? 0}+${card.attackBuff}` : String(atk);
+  const atkDisplay = String(atk);
   const clickableAsSpellTarget = isSpellTarget && onSpellTarget;
   return (
     <div
@@ -257,7 +257,7 @@ function OpponentCreatureAsTarget({
   const maxHp = effectiveMaxHealth(template, card);
   const health = card.currentHealth ?? template.health ?? 0;
   const atk = effectiveAttack(template, card);
-  const atkDisplay = (card.attackBuff ?? 0) > 0 ? `${template.attack ?? 0}+${card.attackBuff}` : String(atk);
+  const atkDisplay = String(atk);
   const clickable = (isAttackTarget || isSpellTarget) && onTarget;
   const borderColor = isSpellTarget ? "#4fc3f7" : isAttackTarget ? "#ff9800" : "#444";
   const hint = isSpellTarget ? "Click to target" : isAttackTarget ? "Click to attack" : null;

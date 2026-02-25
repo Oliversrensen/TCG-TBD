@@ -219,17 +219,13 @@ describe("applyAction", () => {
       expect(r.state.persistentEffects?.length).toBe(1);
       expect(r.state.persistentEffects![0].ownerIndex).toBe(0);
       expect(r.state.persistentEffects![0].turnsRemaining).toBe(3);
-      expect(r.state.persistentEffects![0].triggerPhase).toBe("start_of_turn");
+      expect(r.state.persistentEffects![0].triggerPhase).toBe("end_of_turn");
     });
 
-    it("persistent effect: deal damage to enemy minions at start of turn", () => {
+    it("persistent effect: deal damage to enemy minions at end of owner turn", () => {
       let s = createInitialState();
       s.players[0].hand.push({ instanceId: "p0-curse", cardId: "curse_of_agony" });
-      s.players[0].hand.push({ instanceId: "p0-mur", cardId: "murloc" });
       let r = applyAction(s, 0, { type: "play_spell", cardInstanceId: "p0-curse" });
-      if (!r.ok) return;
-      s = r.state;
-      r = applyAction(s, 0, { type: "play_creature", cardInstanceId: "p0-mur" });
       if (!r.ok) return;
       s = r.state;
       r = applyAction(s, 0, { type: "end_turn" });
@@ -239,21 +235,26 @@ describe("applyAction", () => {
       r = applyAction(s, 1, { type: "play_creature", cardInstanceId: p1Murloc.instanceId });
       if (!r.ok) return;
       s = r.state;
-      r = applyAction(s, 1, {
-        type: "attack",
-        attackerInstanceId: s.players[1].board[0].instanceId,
-        targetId: s.players[0].board[0].instanceId,
-      });
+      expect(s.players[1].board.length).toBe(1);
+      r = applyAction(s, 1, { type: "end_turn" });
+      if (!r.ok) return;
+      s = r.state;
+      s.players[0].hand.push({ instanceId: "p0-mur", cardId: "murloc" });
+      r = applyAction(s, 0, { type: "play_creature", cardInstanceId: "p0-mur" });
+      if (!r.ok) return;
+      s = r.state;
+      r = applyAction(s, 0, { type: "end_turn" });
       if (!r.ok) return;
       s = r.state;
       expect(s.players[1].board[0].currentHealth).toBe(1);
       r = applyAction(s, 1, { type: "end_turn" });
       if (!r.ok) return;
       s = r.state;
-      expect(s.currentTurn).toBe(0);
+      r = applyAction(s, 0, { type: "end_turn" });
+      if (!r.ok) return;
+      s = r.state;
+      expect(s.currentTurn).toBe(1);
       expect(s.players[1].board.length).toBe(0);
-      expect(s.persistentEffects!.length).toBe(1);
-      expect(s.persistentEffects![0].turnsRemaining).toBe(2);
     });
 
     it("deals damage to enemy creature and removes it when health <= 0", () => {
@@ -481,7 +482,7 @@ describe("applyAction", () => {
       expect(r.state.players[0].board[0].currentHealth).toBe(2);
     });
 
-    it("Berserker: gains attack when hit in combat, uses buffed attack for counter-damage", () => {
+    it("Berserker: gains attack after combat exchange (counter-damage uses base attack)", () => {
       let s = createInitialState();
       s.players[0].hand.push({ instanceId: "p0-ber", cardId: "berserker" });
       s.players[1].hand.push({ instanceId: "p1-mur", cardId: "murloc" });

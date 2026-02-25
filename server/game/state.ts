@@ -130,11 +130,13 @@ function getEffectiveAttack(template: { attack?: number }, instance: CardInstanc
   return (template.attack ?? 0) + (instance.attackBuff ?? 0);
 }
 
-/** Apply damage to a target; update state in place. Runs on_damage triggers. Return true if hero died. */
+/** Apply damage to a target; update state in place. Optionally runs on_damage triggers (default true). Optionally skips removing dead creatures (for combat, so triggers run after exchange). */
 function applyDamageToTarget(
   state: GameState,
   targetId: string,
-  damage: number
+  damage: number,
+  runTriggers = true,
+  skipSplice = false
 ): boolean {
   const t = resolveTarget(state, targetId);
   if (!t) return false;
@@ -148,9 +150,19 @@ function applyDamageToTarget(
   if (idx === -1) return false;
   const c = board[idx];
   c.currentHealth = (c.currentHealth ?? 0) - damage;
-  runCreatureTriggers(state, t.playerIndex, c, "on_damage");
-  if ((c.currentHealth ?? 0) <= 0) board.splice(idx, 1);
+  if (runTriggers) runCreatureTriggers(state, t.playerIndex, c, "on_damage");
+  if (!skipSplice && (c.currentHealth ?? 0) <= 0) board.splice(idx, 1);
   return false;
+}
+
+/** Remove dead creatures from both boards. */
+function removeDeadCreatures(state: GameState): void {
+  for (const pi of [0, 1] as const) {
+    const board = state.players[pi].board;
+    for (let i = board.length - 1; i >= 0; i--) {
+      if ((board[i].currentHealth ?? 0) <= 0) board.splice(i, 1);
+    }
+  }
 }
 
 /** Result of applying an action: new state or error message. */
@@ -309,10 +321,15 @@ function handleAttack(
     const a = player.board.find((c) => c.instanceId === action.attackerInstanceId);
     if (a) a.attackedThisTurn = true;
   } else {
-    applyDamageToTarget(next, action.targetId, attackDamage);
+    applyDamageToTarget(next, action.targetId, attackDamage, false, true);
     const targetTemplate = getCardTemplate(target.instance.cardId);
-    const counterDamage = targetTemplate?.type === "creature" ? getEffectiveAttack(targetTemplate, target.instance) : 0;
-    applyDamageToTarget(next, action.attackerInstanceId, counterDamage);
+    const counterDamage = targetTemplate?.type === "creature" ? (targetTemplate.attack ?? 0) : 0;
+    applyDamageToTarget(next, action.attackerInstanceId, counterDamage, false, true);
+    const targetCreature = next.players[enemyIndex].board.find((c) => c.instanceId === action.targetId);
+    const attackerCreature = player.board.find((c) => c.instanceId === action.attackerInstanceId);
+    if (targetCreature) runCreatureTriggers(next, enemyIndex, targetCreature, "on_damage");
+    if (attackerCreature) runCreatureTriggers(next, playerIndex, attackerCreature, "on_damage");
+    removeDeadCreatures(next);
     const stillAlive = player.board.some((c) => c.instanceId === action.attackerInstanceId);
     if (stillAlive) {
       const a = player.board.find((c) => c.instanceId === action.attackerInstanceId)!;

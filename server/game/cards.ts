@@ -97,7 +97,7 @@ export const CARD_TEMPLATES: CardTemplate[] = [
     spellEffect: "create_persistent",
     requiresTarget: false,
     spellPersistent: {
-      triggerPhase: "start_of_turn",
+      triggerPhase: "end_of_turn",
       duration: 3,
       effect: { type: "deal_damage_all_enemy_minions", damage: 1 },
     },
