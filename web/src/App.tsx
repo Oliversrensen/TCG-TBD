@@ -12,14 +12,10 @@ import {
   type DragStartEvent,
 } from "@dnd-kit/core";
 import { useGame } from "./useGame";
-import { GameScene3D } from "./GameScene3D";
 import { getCardTemplate } from "./cardData";
 import { cardName } from "./cardNames";
 import { authClient, getNeonAuthToken } from "./auth";
 import type { CardInstance } from "./types";
-
-const CARD_WIDTH = 100;
-const CARD_HEIGHT = Math.round(CARD_WIDTH * (3.5 / 2.5));
 
 export interface TargetOption {
   targetId: string;
@@ -37,17 +33,6 @@ function buildAttackTargets(
   return opts;
 }
 
-const cardShape = {
-  width: CARD_WIDTH,
-  height: CARD_HEIGHT,
-  borderRadius: 10,
-  padding: 8,
-  boxSizing: "border-box" as const,
-  display: "flex",
-  flexDirection: "column" as const,
-  border: "2px solid rgba(212,175,55,0.4)",
-};
-
 function HeroBlock({
   label,
   health,
@@ -63,8 +48,8 @@ function HeroBlock({
   targetKind?: "spell" | "attack";
   onTarget?: (id: string) => void;
 }) {
-  const clickable = isTarget && onTarget && targetId;
-  const borderColor = targetKind === "spell" ? "#4fc3f7" : targetKind === "attack" ? "#ff9800" : "rgba(255,255,255,0.15)";
+  const clickable = Boolean(isTarget && onTarget && targetId);
+  const hintColor = targetKind === "attack" ? "#f59e0b" : "#5b9bd5";
   return (
     <motion.div
       role={clickable ? "button" : undefined}
@@ -72,23 +57,11 @@ function HeroBlock({
       onClick={clickable ? () => onTarget!(targetId!) : undefined}
       onKeyDown={clickable ? (e) => e.key === "Enter" && onTarget?.(targetId!) : undefined}
       className={`tcg-hero ${clickable ? "tcg-hero-targetable" : ""}`}
-      whileHover={clickable ? { scale: 1.02, y: -2 } : {}}
-      style={{
-        padding: "14px 24px",
-        background: isTarget
-          ? "linear-gradient(180deg, rgba(79,195,247,0.2) 0%, rgba(79,195,247,0.05) 100%)"
-          : "linear-gradient(180deg, rgba(26,35,50,0.9) 0%, rgba(15,20,30,0.95) 100%)",
-        borderRadius: 14,
-        border: isTarget ? `2px solid ${borderColor}` : "1px solid rgba(255,255,255,0.1)",
-        cursor: clickable ? "pointer" : "default",
-        minWidth: 130,
-        textAlign: "center",
-        boxShadow: isTarget ? "0 0 24px rgba(79,195,247,0.3)" : "0 4px 16px rgba(0,0,0,0.3)",
-      }}
+      whileHover={clickable ? { scale: 1.02 } : {}}
     >
-      <div style={{ fontSize: 12, color: "#aaa" }}>{label}</div>
-      <div style={{ fontSize: 24, fontWeight: "bold" }}>❤️ {health}</div>
-      {isTarget && <div style={{ fontSize: 10, color: borderColor, marginTop: 4 }}>Click to target</div>}
+      <div className="tcg-hero-label">{label}</div>
+      <div className="tcg-hero-health">❤ {health}</div>
+      {isTarget && <div style={{ fontSize: 10, color: hintColor, marginTop: 4 }}>Click to target</div>}
     </motion.div>
   );
 }
@@ -155,73 +128,44 @@ function HandCard({
     ? ((index / (totalCards - 1 || 1)) - 0.5) * 12
     : 0;
 
-  const cardEl = (
+  return (
     <motion.div
       ref={dragProps?.setNodeRef}
       {...(dragProps?.attributes)}
       {...(dragProps?.listeners)}
       layout
-      initial={{ opacity: 0, y: 20 }}
+      initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
-      className={`tcg-card-3d ${playableNoTarget ? "tcg-card-playable" : ""}`}
+      className={`tcg-card ${template.type === "creature" ? "tcg-card-creature" : "tcg-card-spell"} ${playableNoTarget ? "tcg-card-playable" : ""}`}
       style={{
-        ...cardShape,
-        background: template.type === "creature" ? "var(--card-creature)" : "var(--card-spell)",
-        opacity: canAfford ? (dragProps?.isDragging ? 0.9 : 1) : 0.75,
-        border: isThisSpellSelected ? "2px solid #4fc3f7" : "2px solid rgba(212,175,55,0.5)",
-        boxShadow: dragProps?.isDragging ? "var(--card-shadow-drag)" : "var(--card-shadow)",
+        opacity: canAfford ? (dragProps?.isDragging ? 0.9 : 1) : 0.7,
         transform: `rotate(${fanOffset}deg)`,
         zIndex: dragProps?.isDragging ? 1000 : undefined,
+        borderColor: isThisSpellSelected ? "#5b9bd5" : undefined,
       }}
     >
-      <div className="tcg-card-face" style={{ flex: 1, display: "flex", flexDirection: "column", padding: 8 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-          <span
-            style={{
-              width: 26,
-              height: 26,
-              borderRadius: "50%",
-              background: "linear-gradient(180deg, #2d5a8a 0%, #1a3a5a 100%)",
-              color: "#fff",
-              fontSize: 13,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontWeight: "bold",
-              boxShadow: "inset 0 1px 0 rgba(255,255,255,0.2)",
-            }}
-          >
-            {template.cost}
-          </span>
-        </div>
-        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, textAlign: "center", lineHeight: 1.2 }}>
-          {template.name}
-        </div>
-        <div style={{ fontSize: 10, color: "rgba(255,255,255,0.8)", textAlign: "center" }}>
-          {isCreature && `${template.attack}/${template.health}`}
-          {isSpell && spellDescription(template)}
-        </div>
-        <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 4 }}>
-          {canAfford && isCreature && (
-            <button type="button" onClick={(e) => { e.stopPropagation(); onPlayCreature(card.instanceId); }} style={{ width: "100%", padding: "4px 0", fontSize: 10, cursor: "pointer" }}>
-              Play
-            </button>
-          )}
-          {canAfford && isSpell && spellNeedsTarget && (
-            <button type="button" onClick={(e) => { e.stopPropagation(); onStartSpellTarget(card.instanceId); }} style={{ width: "100%", padding: "4px 0", fontSize: 10, cursor: "pointer" }}>
-              {isThisSpellSelected ? "Click a target above" : "Choose target"}
-            </button>
-          )}
-          {canAfford && isSpell && !spellNeedsTarget && (
-            <button type="button" onClick={(e) => { e.stopPropagation(); onPlaySpellNoTarget(card.instanceId); }} style={{ width: "100%", padding: "4px 0", fontSize: 10, cursor: "pointer" }}>
-              Play
-            </button>
-          )}
-        </div>
+      <span className="tcg-card-cost">{template.cost}</span>
+      <div className="tcg-card-name">{template.name}</div>
+      <div className="tcg-card-stats">
+        {isCreature && `${template.attack}/${template.health}`}
+        {isSpell && spellDescription(template)}
+      </div>
+      {template.keywords?.length ? <div className="tcg-card-keywords">{template.keywords.join(" ")}</div> : null}
+      <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 4 }}>
+        {canAfford && isCreature && (
+          <button type="button" onClick={(e) => { e.stopPropagation(); onPlayCreature(card.instanceId); }}>Play</button>
+        )}
+        {canAfford && isSpell && spellNeedsTarget && (
+          <button type="button" onClick={(e) => { e.stopPropagation(); onStartSpellTarget(card.instanceId); }}>
+            {isThisSpellSelected ? "Click a target above" : "Choose target"}
+          </button>
+        )}
+        {canAfford && isSpell && !spellNeedsTarget && (
+          <button type="button" onClick={(e) => { e.stopPropagation(); onPlaySpellNoTarget(card.instanceId); }}>Play</button>
+        )}
       </div>
     </motion.div>
   );
-  return cardEl;
 }
 
 const MAX_BOARD_SLOTS = 7;
@@ -256,27 +200,14 @@ function DraggableHandCard(props: Parameters<typeof HandCard>[0] & { canDrag: bo
 function DroppableSlot({
   slotIndex,
   children,
-  isEmpty,
 }: {
   slotIndex: number;
   children: ReactNode;
-  isEmpty: boolean;
+  isEmpty?: boolean;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: slotId(slotIndex) });
   return (
-    <div
-      ref={setNodeRef}
-      className={`tcg-drop-zone tcg-drop-slot ${isOver ? "tcg-drop-active" : ""}`}
-      style={{
-        minWidth: 90,
-        minHeight: 120,
-        borderRadius: 8,
-        padding: 4,
-        transition: "all 0.2s ease",
-        background: isEmpty && isOver ? "rgba(76, 175, 80, 0.25)" : isEmpty ? "rgba(0,0,0,0.2)" : "transparent",
-        border: isOver ? "2px dashed rgba(76, 175, 80, 0.8)" : "1px dashed rgba(255,255,255,0.15)",
-      }}
-    >
+    <div ref={setNodeRef} className={`tcg-drop-zone tcg-drop-slot ${isOver ? "tcg-drop-active" : ""}`}>
       {children}
     </div>
   );
@@ -310,34 +241,29 @@ function MyBoardCreature({
   return (
     <motion.div
       layout
-      initial={{ scale: 0.8, opacity: 0 }}
+      initial={{ scale: 0.9, opacity: 0 }}
       animate={{ scale: 1, opacity: 1 }}
-      className="tcg-card-3d"
+      className={`tcg-card tcg-card-creature ${isSelectedAttacker ? "tcg-card-selected" : ""}`}
       role={clickableAsSpellTarget ? "button" : undefined}
       tabIndex={clickableAsSpellTarget ? 0 : undefined}
       onClick={clickableAsSpellTarget ? () => onSpellTarget?.(card.instanceId) : undefined}
       onKeyDown={clickableAsSpellTarget ? (e) => e.key === "Enter" && onSpellTarget?.(card.instanceId) : undefined}
       style={{
-        ...cardShape,
-        background: isSelectedAttacker ? "linear-gradient(165deg, #2d5a4a 0%, #1e4a3a 100%)" : "var(--card-creature)",
-        border: isSelectedAttacker ? "2px solid #4caf50" : isSpellTarget ? "2px solid #4fc3f7" : "2px solid rgba(212,175,55,0.4)",
+        borderColor: isSelectedAttacker ? "var(--accent-success)" : isSpellTarget ? "#5b9bd5" : undefined,
         cursor: clickableAsSpellTarget ? "pointer" : "default",
-        boxShadow: isSelectedAttacker ? "var(--glow-green)" : "var(--card-shadow)",
       }}
     >
-      <div style={{ fontSize: 10, color: "#888" }}>{template.cost}</div>
-      <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, textAlign: "center" }}>
-        {template.name}
+      <span className="tcg-card-cost">{template.cost}</span>
+      <div className="tcg-card-name">{template.name}</div>
+      {template.keywords?.length ? <div className="tcg-card-keywords">{template.keywords.join(" ")}</div> : null}
+      <div className="tcg-card-stats">
+        <span>⚔ {atkDisplay}</span>
+        <span>❤ {maxHp > (template.health ?? 0) ? `${health}/${maxHp}` : health}</span>
       </div>
-      {template.keywords?.length ? <div style={{ fontSize: 9, color: "#b8a" }}>{template.keywords.join(" ")}</div> : null}
-      <div style={{ display: "flex", justifyContent: "space-around", fontSize: 11 }}>
-        <span>⚔️ {atkDisplay}</span>
-        <span>❤️ {maxHp > (template.health ?? 0) ? `${health}/${maxHp}` : health}</span>
-      </div>
-      {attacked && <div style={{ fontSize: 9, color: "#888" }}>Attacked</div>}
-      {isSpellTarget && <div style={{ fontSize: 9, color: "#4fc3f7" }}>Click to target</div>}
+      {attacked && <div style={{ fontSize: 9, color: "var(--text-muted)" }}>Attacked</div>}
+      {isSpellTarget && <div style={{ fontSize: 9, color: "#5b9bd5" }}>Click to target</div>}
       {canAttack && !attacked && !isSpellTarget && (
-        <button type="button" onClick={(e) => { e.stopPropagation(); onStartAttack(card.instanceId); }} style={{ fontSize: 9, marginTop: 2, cursor: "pointer" }}>
+        <button type="button" onClick={(e) => { e.stopPropagation(); onStartAttack(card.instanceId); }}>
           {isSelectedAttacker ? "Click enemy above" : "Attack"}
         </button>
       )}
@@ -369,27 +295,22 @@ function OpponentCreatureAsTarget({
   return (
     <motion.div
       layout
-      className="tcg-card-3d"
+      className="tcg-card tcg-card-creature"
       role={clickable ? "button" : undefined}
       tabIndex={clickable ? 0 : undefined}
       onClick={clickable ? () => onTarget?.(card.instanceId) : undefined}
       onKeyDown={clickable ? (e) => e.key === "Enter" && onTarget?.(card.instanceId) : undefined}
       style={{
-        ...cardShape,
-        background: "var(--card-creature)",
-        border: clickable ? `2px solid ${borderColor}` : "2px solid rgba(212,175,55,0.4)",
+        borderColor: clickable ? borderColor : undefined,
         cursor: clickable ? "pointer" : "default",
-        boxShadow: clickable ? (isSpellTarget ? "var(--glow-blue)" : "var(--glow-orange)") : "var(--card-shadow)",
       }}
     >
-      <div style={{ fontSize: 10, color: "#888" }}>{template.cost}</div>
-      <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, textAlign: "center" }}>
-        {template.name}
-      </div>
-      {template.keywords?.length ? <div style={{ fontSize: 9, color: "#b8a" }}>{template.keywords.join(" ")}</div> : null}
-      <div style={{ display: "flex", justifyContent: "space-around", fontSize: 11 }}>
-        <span>⚔️ {atkDisplay}</span>
-        <span>❤️ {maxHp > (template.health ?? 0) ? `${health}/${maxHp}` : health}</span>
+      <span className="tcg-card-cost">{template.cost}</span>
+      <div className="tcg-card-name">{template.name}</div>
+      {template.keywords?.length ? <div className="tcg-card-keywords">{template.keywords.join(" ")}</div> : null}
+      <div className="tcg-card-stats">
+        <span>⚔ {atkDisplay}</span>
+        <span>❤ {maxHp > (template.health ?? 0) ? `${health}/${maxHp}` : health}</span>
       </div>
       {hint && <div style={{ fontSize: 9, color: borderColor }}>{hint}</div>}
     </motion.div>
@@ -466,11 +387,11 @@ function MatchmakingScreen({
   };
 
   return (
-    <div style={{ padding: 24, maxWidth: 480, margin: "0 auto", fontFamily: "system-ui" }}>
-      <h1>TCG – Matchmaking</h1>
-      {error && <p style={{ color: "#e74c3c", marginBottom: 8 }}>{error}</p>}
+    <div className="tcg-screen">
+      <h1>TCG — Matchmaking</h1>
+      {error && <p style={{ color: "var(--accent-danger)", marginBottom: 12 }}>{error}</p>}
 
-      <div style={{ marginBottom: 24, padding: 12, borderRadius: 8, background: "#111827" }}>
+      <div className="tcg-panel">
         {authUser ? (
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
             <span style={{ fontSize: 13, color: "#a5b4fc" }}>Logged in as <strong>{authUser.username}</strong></span>
@@ -758,8 +679,9 @@ export default function App() {
 
   if (status === "closed" || status === "error") {
     return (
-      <div style={{ padding: 24, maxWidth: 500 }}>
-        <p style={{ color: "#e74c3c" }}>Connection failed</p>
+      <div className="tcg-screen">
+        <h1>TCG</h1>
+        <p style={{ color: "var(--accent-danger)", marginBottom: 16 }}>Connection failed</p>
         <p>{closeReason || error || "Unknown error."}</p>
         <button
           type="button"
@@ -774,7 +696,9 @@ export default function App() {
 
   if (status === "connecting" || !connected) {
     return (
-      <div style={{ padding: 24 }}>
+      <div className="tcg-screen">
+        <h1>TCG</h1>
+        <p style={{ color: "var(--text-secondary)" }}>Connecting…</p>
       </div>
     );
   }
@@ -806,30 +730,23 @@ export default function App() {
   };
 
   return (
-    <div className="tcg-perspective" style={{ position: "relative", minHeight: "100vh" }}>
-      <GameScene3D />
-      <div style={{ position: "relative", zIndex: 10 }}>
+    <div className="tcg-app">
       <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd} onDragCancel={() => setActiveCard(null)}>
-    <div className="tcg-board-3d">
-      <div className="tcg-board-surface">
-    <div style={{ padding: "0 16px", fontFamily: "system-ui" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20, flexWrap: "wrap", gap: 12 }}>
-        <h1 style={{ margin: 0, fontSize: 28, background: "linear-gradient(180deg, #d4af37 0%, #8b6914 100%)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text" }}>TCG</h1>
-        <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
-          <div style={{ padding: "10px 16px", background: "linear-gradient(180deg, rgba(26,35,50,0.95) 0%, rgba(15,20,30,0.98) 100%)", borderRadius: 12, border: "1px solid rgba(212,175,55,0.3)", boxShadow: "0 4px 12px rgba(0,0,0,0.3)" }}>
-            <span style={{ fontSize: 12, color: "rgba(255,255,255,0.7)" }}>Mana </span>
-            <span style={{ fontSize: 22, fontWeight: "bold", color: "#64b5f6" }}>{state.manaRemaining} / 10</span>
+    <div className="tcg-board">
+    <div className="tcg-board-inner">
+      <div className="tcg-hud">
+        <h1 className="tcg-title">TCG</h1>
+        <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+          <div className="tcg-hud-pill">
+            <span className="tcg-hud-label">Mana</span>
+            <span className="tcg-hud-value tcg-mana">{state.manaRemaining} / 10</span>
           </div>
-          <div style={{ padding: "10px 16px", background: "linear-gradient(180deg, rgba(26,35,50,0.95) 0%, rgba(15,20,30,0.98) 100%)", borderRadius: 12, border: "1px solid rgba(212,175,55,0.3)", boxShadow: "0 4px 12px rgba(0,0,0,0.3)" }}>
-            <span style={{ fontSize: 12, color: "rgba(255,255,255,0.7)" }}>Turn </span>
-            <span style={{ fontSize: 18, fontWeight: "600" }}>{state.currentTurn === myIndex ? "You" : (opponentUsername ?? "Opponent")}</span>
+          <div className="tcg-hud-pill">
+            <span className="tcg-hud-label">Turn</span>
+            <span className="tcg-hud-value">{state.currentTurn === myIndex ? "You" : (opponentUsername ?? "Opponent")}</span>
           </div>
           {state.winner !== null && (
-            <motion.div
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              style={{ padding: "12px 20px", background: "linear-gradient(180deg, #2d5a4a 0%, #1e4a3a 100%)", borderRadius: 12, color: "#4caf50", fontSize: 20, fontWeight: "bold", boxShadow: "var(--glow-green)" }}
-            >
+            <motion.div className="tcg-winner" initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}>
               {state.winner === myIndex ? "You win!" : "You lose!"}
             </motion.div>
           )}
@@ -846,10 +763,10 @@ export default function App() {
             ))}
         </div>
       ) : null}
-      {error && <p style={{ color: "#e74c3c", marginBottom: 8 }}>{error}</p>}
+      {error && <p style={{ color: "var(--accent-danger)", marginBottom: 12 }}>{error}</p>}
 
       {/* Opponent side (top) */}
-      <div style={{ background: "rgba(0,0,0,0.25)", borderRadius: 16, padding: 20, marginBottom: 20 }}>
+      <div className="tcg-section">
         {spellTargetCardInstanceId && (
           <p style={{ fontSize: 12, color: "#4fc3f7", marginBottom: 8 }}>
             Choose a target for your spell (hero or minion).
@@ -866,7 +783,7 @@ export default function App() {
             onTarget={handleTargetClick}
           />
         </div>
-        <div style={{ fontSize: 12, color: "#aaa", marginBottom: 4 }}>{opponentUsername ?? "Opponent"}&apos;s minions</div>
+        <div className="tcg-section-title">{opponentUsername ?? "Opponent"}&apos;s minions</div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", minHeight: 50 }}>
           {oppPlayer?.board.length === 0 && <span style={{ color: "#666" }}>No minions</span>}
           {oppPlayer?.board.map((c) => (
@@ -883,11 +800,11 @@ export default function App() {
       </div>
 
       {/* Your side (bottom): your board, your hero, your hand */}
-      <div style={{ background: "rgba(0,0,0,0.2)", borderRadius: 16, padding: 20, marginBottom: 20 }}>
-        <div style={{ fontSize: 12, color: "rgba(255,255,255,0.7)", marginBottom: 8 }}>Your minions – drag to a slot</div>
-        <div style={{ display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap", minHeight: 130, marginBottom: 16 }}>
+      <div className="tcg-section">
+        <div className="tcg-section-title">Your minions — drag to a slot</div>
+        <div className="tcg-board-slots">
           {Array.from({ length: MAX_BOARD_SLOTS }, (_, i) => (
-            <DroppableSlot key={i} slotIndex={i} isEmpty={!myPlayer?.board[i]}>
+            <DroppableSlot key={i} slotIndex={i}>
               {myPlayer?.board[i] ? (
                 <MyBoardCreature
                   card={myPlayer.board[i]}
@@ -915,10 +832,10 @@ export default function App() {
           />
         </div>
 
-        <div style={{ fontSize: 12, color: "rgba(255,255,255,0.7)", marginBottom: 8 }}>
-          Your hand (deck: {myPlayer?.deck.length ?? 0}) – drag to play or click Play
+        <div className="tcg-section-title">
+          Your hand (deck: {myPlayer?.deck.length ?? 0}) — drag to play or click Play
         </div>
-        <div className="tcg-hand" style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
+        <div className="tcg-hand">
           {myPlayer?.hand.map((c, i) => (
             <DraggableHandCard
               key={c.instanceId}
@@ -938,23 +855,16 @@ export default function App() {
         </div>
 
         {isMyTurn && (
-          <motion.button
-            type="button"
-            onClick={handleEndTurn}
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.98 }}
-            style={{ marginTop: 16, padding: "12px 28px", fontSize: 16, cursor: "pointer", fontWeight: "600" }}
-          >
+          <motion.button type="button" onClick={handleEndTurn} whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} style={{ marginTop: 16, padding: "12px 28px", fontSize: 15, fontWeight: 600 }}>
             End turn
           </motion.button>
         )}
       </div>
 
       {state.lastAction && (
-        <p style={{ marginTop: 12, fontSize: 12, color: "rgba(255,255,255,0.5)" }}>Last: {state.lastAction}</p>
+        <p className="tcg-last-action">Last: {state.lastAction}</p>
       )}
     </div>
-      </div>
     </div>
         <DragOverlay dropAnimation={null}>
           {activeCard ? (
@@ -973,7 +883,6 @@ export default function App() {
           ) : null}
         </DragOverlay>
     </DndContext>
-    </div>
     </div>
   );
 }

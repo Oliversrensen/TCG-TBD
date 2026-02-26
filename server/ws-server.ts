@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "http";
 import { WebSocketServer } from "ws";
 import type { WebSocket } from "ws";
 import { createInitialState, applyAction } from "./game/state.js";
+import { CARD_TEMPLATES } from "./game/cards.js";
 import type { GameState, ClientIntent } from "./game/types.js";
 import type {
   MatchmakingIntent,
@@ -572,6 +573,11 @@ const httpServer = createServer((req, res) => {
   if (method === "GET" && path === "/") {
     res.writeHead(200, { "Content-Type": "text/plain" });
     res.end("TCG server");
+    return;
+  }
+
+  if (method === "GET" && path === "/card-catalog") {
+    sendJson(res, 200, { cards: CARD_TEMPLATES });
     return;
   }
 

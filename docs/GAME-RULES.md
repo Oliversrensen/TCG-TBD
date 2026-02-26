@@ -98,6 +98,7 @@ Changing these in one place (state.ts / cards.ts) is enough; document any change
 The same server that hosts WebSockets also exposes simple JSON HTTP endpoints:
 
 - `GET /` → health check (returns `200 OK` and plain text).
+- `GET /card-catalog` → returns `{ cards: CardTemplate[] }` for clients (e.g. Unity) to fetch card definitions at runtime. No auth required.
 - `POST /auth/register` → body `{ "username": string, "password": string }`  
   Creates a new user (if the username is free) and returns `{ token, userId, username }`. `token` is a JWT signed with `JWT_SECRET` and is used for authenticated calls.
 - `POST /auth/login` → body `{ "username": string, "password": string }`  

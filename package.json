@@ -7,7 +7,8 @@
     "test": "npm test --workspace=server",
     "smoke": "node run-smoke.js",
     "start:server": "npm start --workspace=server",
-    "start:cli": "node cli/index.js"
+    "start:cli": "node cli/index.js",
+    "generate:csharp": "node scripts/generate-csharp-dtos.mjs"
   },
   "workspaces": ["server", "cli", "web"]
 }
